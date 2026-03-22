@@ -1,20 +1,23 @@
-// Entry point: inicializa DB, registra handlers de WhatsApp y arranca el scheduler
+// Entry point: inicializa DB, WhatsApp, health check y scheduler
 
-import { getDb }               from './database/connection.js';
-import { getClientAssignment } from './database/queries.js';
-import { getOrCreateSession, saveSession, clearSession } from './bot/sessionManager.js';
-import { handleMessage }       from './bot/messageHandler.js';
-import { createNewOrder }      from './orders/orderService.js';
-import { processDriverResponse } from './orders/orderService.js';
-import { upsertClientAssignment } from './database/queries.js';
-import { onMessage, sendMessage } from './whatsapp/simulator.js';
-import { startReminderJob }    from './scheduler/reminderJob.js';
-import { DRIVER_PHONES, STEPS } from './config.js';
+import { getDb }                  from './database/connection.js';
+import { getClientAssignment,
+         upsertClientAssignment } from './database/queries.js';
+import { getOrCreateSession,
+         saveSession,
+         clearSession }           from './bot/sessionManager.js';
+import { handleMessage }          from './bot/messageHandler.js';
+import { createNewOrder,
+         processDriverResponse }  from './orders/orderService.js';
+import { onMessage, sendMessage,
+         initWhatsApp }           from './whatsapp/client.js';
+import { startReminderJob }       from './scheduler/reminderJob.js';
+import { startHealthServer }      from './http/healthCheck.js';
+import { DRIVER_PHONES, STEPS }   from './config.js';
 
-// ─── Inicialización ───────────────────────────────────────────────────────────
+// ─── Base de datos ────────────────────────────────────────────────────────────
 
 try {
-  // Forzar apertura de conexión y aplicación del schema al arrancar
   getDb();
   console.log('[DB] Conexión establecida y esquema aplicado.');
 } catch (err) {
@@ -22,12 +25,16 @@ try {
   process.exit(1);
 }
 
+// ─── Health check HTTP (Railway/Render) ───────────────────────────────────────
+
+startHealthServer();
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 // Devuelve el driver_id si el teléfono pertenece a un repartidor conocido, o null
 function getDriverIdByPhone(phone) {
   for (const [id, driverPhone] of Object.entries(DRIVER_PHONES)) {
-    if (driverPhone === phone) return parseInt(id, 10);
+    if (driverPhone && driverPhone === phone) return parseInt(id, 10);
   }
   return null;
 }
@@ -40,7 +47,7 @@ onMessage(async (from, text) => {
     const driverId = getDriverIdByPhone(from);
     if (driverId !== null) {
       const reply = processDriverResponse(driverId, text);
-      sendMessage(from, reply);
+      await sendMessage(from, reply);
       return;
     }
 
@@ -58,13 +65,7 @@ onMessage(async (from, text) => {
     // Ejecutar efectos secundarios descritos por la FSM
     if (sideEffects.createOrder) {
       const { driverId: orderDriverId, status, address, details } = sideEffects.createOrder;
-      createNewOrder({
-        clientPhone: from,
-        driverId:    orderDriverId,
-        address,
-        details,
-        status,
-      });
+      await createNewOrder({ clientPhone: from, driverId: orderDriverId, address, details, status });
     }
 
     if (sideEffects.saveAssignment) {
@@ -78,11 +79,11 @@ onMessage(async (from, text) => {
       saveSession(from, nextStep, nextData);
     }
 
-    sendMessage(from, reply);
+    await sendMessage(from, reply);
 
   } catch (err) {
     console.error(`[Bot] Error procesando mensaje de ${from}:`, err.message);
-    sendMessage(from, 'Ocurrió un error. Por favor, intentá de nuevo.');
+    await sendMessage(from, 'Ocurrió un error. Por favor, intentá de nuevo.');
   }
 });
 
@@ -90,4 +91,10 @@ onMessage(async (from, text) => {
 
 startReminderJob();
 
-console.log('[Bot] Sistema de pedidos activo. Esperando mensajes...');
+// ─── WhatsApp ─────────────────────────────────────────────────────────────────
+
+console.log('[Bot] Iniciando cliente de WhatsApp...');
+initWhatsApp().catch((err) => {
+  console.error('[WhatsApp] Error fatal al inicializar:', err.message);
+  process.exit(1);
+});

@@ -1,16 +1,19 @@
 // Constantes globales: repartidores, estados de pedido, pasos de conversación y mensajes del bot
 
+import 'dotenv/config';
+
 export const DRIVERS = {
   1: 'Silvio',
   2: 'Alejandro',
   3: 'Damian',
 };
 
-// Números de teléfono simulados de cada repartidor (usados por el simulador)
+// Teléfonos reales de cada repartidor, configurados via variables de entorno.
+// Formato: solo dígitos, sin +. Ej: 5491112345678
 export const DRIVER_PHONES = {
-  1: 'driver_1',
-  2: 'driver_2',
-  3: 'driver_3',
+  1: process.env.DRIVER_1_PHONE,
+  2: process.env.DRIVER_2_PHONE,
+  3: process.env.DRIVER_3_PHONE,
 };
 
 export const ORDER_STATUS = {

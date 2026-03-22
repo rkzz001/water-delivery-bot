@@ -2,14 +2,9 @@
 
 import cron from 'node-cron';
 import { getPendingOrdersGroupedByDriver } from '../database/queries.js';
-import { sendMessage } from '../whatsapp/simulator.js';
+import { sendMessage } from '../whatsapp/client.js';
 import { DRIVER_PHONES, MESSAGES } from '../config.js';
 
-/**
- * Agrupa un array de pedidos por driver_id.
- * @param {object[]} orders
- * @returns {Record<number, object[]>}
- */
 function groupByDriver(orders) {
   return orders.reduce((acc, order) => {
     if (!acc[order.driver_id]) acc[order.driver_id] = [];
@@ -19,10 +14,10 @@ function groupByDriver(orders) {
 }
 
 /**
- * Ejecuta el envío de recordatorios a todos los repartidores con pedidos pendientes.
- * Se puede llamar directamente para tests; el cron la invoca automáticamente.
+ * Envía recordatorios a todos los repartidores con pedidos pendientes.
+ * Exportada para poder invocarla manualmente en tests.
  */
-export function sendReminders() {
+export async function sendReminders() {
   try {
     const orders  = getPendingOrdersGroupedByDriver();
     const grouped = groupByDriver(orders);
@@ -31,10 +26,10 @@ export function sendReminders() {
       const driverPhone = DRIVER_PHONES[driverId];
       if (!driverPhone) continue;
 
-      const lines = driverOrders.map((o) => MESSAGES.REMINDER_LINE(o));
+      const lines   = driverOrders.map((o) => MESSAGES.REMINDER_LINE(o));
       const message = [MESSAGES.REMINDER_HEADER, ...lines].join('\n');
 
-      sendMessage(driverPhone, message);
+      await sendMessage(driverPhone, message);
     }
   } catch (err) {
     console.error('[Scheduler] Error al enviar recordatorios:', err.message);

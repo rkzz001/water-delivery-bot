@@ -1,5 +1,4 @@
 // Todas las queries SQL del sistema: cada función encapsula una operación atómica
-// NOTA: node-sqlite3-wasm requiere parámetros como array: stmt.run([a, b, c])
 
 import { getDb } from './connection.js';
 import { ORDER_STATUS } from '../config.js';
@@ -9,7 +8,7 @@ import { ORDER_STATUS } from '../config.js';
 export function getSession(phone) {
   return getDb()
     .prepare('SELECT * FROM sessions WHERE phone = ?')
-    .get([phone]);
+    .get(phone);
 }
 
 export function upsertSession(phone, step, data) {
@@ -22,13 +21,13 @@ export function upsertSession(phone, step, data) {
         data       = excluded.data,
         updated_at = excluded.updated_at
     `)
-    .run([phone, step, JSON.stringify(data)]);
+    .run(phone, step, JSON.stringify(data));
 }
 
 export function deleteSession(phone) {
   getDb()
     .prepare('DELETE FROM sessions WHERE phone = ?')
-    .run([phone]);
+    .run(phone);
 }
 
 // ─── Asignaciones cliente → repartidor ───────────────────────────────────────
@@ -36,7 +35,7 @@ export function deleteSession(phone) {
 export function getClientAssignment(phone) {
   return getDb()
     .prepare('SELECT * FROM client_assignments WHERE phone = ?')
-    .get([phone]);
+    .get(phone);
 }
 
 export function upsertClientAssignment(phone, driverId) {
@@ -48,7 +47,7 @@ export function upsertClientAssignment(phone, driverId) {
         driver_id  = excluded.driver_id,
         updated_at = excluded.updated_at
     `)
-    .run([phone, driverId]);
+    .run(phone, driverId);
 }
 
 // ─── Pedidos ─────────────────────────────────────────────────────────────────
@@ -59,16 +58,15 @@ export function createOrder({ clientPhone, driverId, address, details, status })
       INSERT INTO orders (client_phone, driver_id, address, details, status)
       VALUES (?, ?, ?, ?, ?)
     `)
-    .run([clientPhone, driverId ?? null, address, details, status]);
+    .run(clientPhone, driverId ?? null, address, details, status);
 
-  // node-sqlite3-wasm devuelve { lastInsertRowid } igual que better-sqlite3
   return getOrderById(result.lastInsertRowid);
 }
 
 export function getOrderById(id) {
   return getDb()
     .prepare('SELECT * FROM orders WHERE id = ?')
-    .get([id]);
+    .get(id);
 }
 
 export function updateOrderStatus(id, status) {
@@ -78,7 +76,7 @@ export function updateOrderStatus(id, status) {
       SET status = ?, updated_at = datetime('now')
       WHERE id = ?
     `)
-    .run([status, id]);
+    .run(status, id);
 }
 
 // Pedidos activos (PENDING o ASSIGNED) asignados a un repartidor específico
@@ -90,7 +88,7 @@ export function getActiveOrdersByDriver(driverId) {
         AND status IN (?, ?)
       ORDER BY created_at ASC
     `)
-    .all([driverId, ORDER_STATUS.PENDING, ORDER_STATUS.ASSIGNED]);
+    .all(driverId, ORDER_STATUS.PENDING, ORDER_STATUS.ASSIGNED);
 }
 
 // Pedidos pendientes o no atendidos agrupados por repartidor (para el scheduler)
@@ -102,5 +100,5 @@ export function getPendingOrdersGroupedByDriver() {
         AND driver_id IS NOT NULL
       ORDER BY driver_id, created_at ASC
     `)
-    .all([ORDER_STATUS.PENDING, ORDER_STATUS.NOT_ANSWERED]);
+    .all(ORDER_STATUS.PENDING, ORDER_STATUS.NOT_ANSWERED);
 }
