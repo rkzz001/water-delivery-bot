@@ -315,6 +315,24 @@ El dashboard es una app Next.js 15 (App Router) desplegada en Vercel. Permite al
 
 ## Changelog
 
+### v2.3 — Fix PreciosModal: input atascado + error RLS al guardar (2026-03-24)
+
+**Bug: input atascado en el último dígito**
+- El `handleChange` original usaba `parseInt` y guardaba el valor solo si `!isNaN`. Al borrar todos los dígitos el campo quedaba en `""` → `parseInt("") = NaN` → la guarda no ocurría → el input volvía al valor anterior y no se podía vaciar.
+- Fix: estado separado `inputValues: Record<string, string>` para el display. El string se guarda tal cual (incluyendo `""`); la conversión a número ocurre únicamente en `handleSave` con validación.
+
+**Bug: error genérico al guardar — causa raíz RLS**
+- El toast mostraba siempre "Error al guardar los precios" sin detalles.
+- Fix: el toast ahora muestra `error.message` real de Supabase.
+- Causa raíz: la tabla `configuracion` (y `fechas_cerrado`) tenía RLS habilitado por defecto en Supabase, bloqueando el UPSERT desde la anon key del Dashboard.
+- Solución: ejecutar en Supabase SQL Editor:
+  ```sql
+  ALTER TABLE configuracion DISABLE ROW LEVEL SECURITY;
+  ALTER TABLE fechas_cerrado DISABLE ROW LEVEL SECURITY;
+  ```
+
+---
+
 ### v2.2 — Catálogo ampliado, precios dinámicos y disponibilidad (2026-03-24)
 
 **Nuevos productos:**
