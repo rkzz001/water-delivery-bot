@@ -73,6 +73,7 @@ export async function createOrder({
       total,
       nota:        notes,
       estado:      status ?? ORDER_STATUS.PENDING,
+      origen:      'bot',
     })
     .select()
     .single();

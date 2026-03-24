@@ -30,6 +30,12 @@ CREATE TABLE IF NOT EXISTS pedidos (
   nota        TEXT,                             -- aclaración opcional del cliente
   estado      TEXT        NOT NULL DEFAULT 'PENDING',
   -- Estados: PENDING | ASSIGNED | DELIVERED | NOT_ANSWERED | UNASSIGNED
+  origen      TEXT        NOT NULL DEFAULT 'bot',
+  -- Origen: bot (WhatsApp) | telefono (carga manual desde dashboard)
   created_at  TIMESTAMPTZ DEFAULT NOW(),
   updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Habilitar Realtime para el dashboard (ejecutar una sola vez)
+-- ALTER TABLE pedidos REPLICA IDENTITY FULL;
+-- En Supabase Dashboard: Database → Replication → activar tabla pedidos
