@@ -10,7 +10,8 @@ INSERT INTO configuracion (clave, valor) VALUES
   ('bidon_8l',   2600),
   ('bidon_10l',  2500),
   ('bidon_12l',  3500),
-  ('bidon_20l',  4000)
+  ('bidon_20l',  4000),
+  ('hora_corte', 14)
 ON CONFLICT (clave) DO NOTHING;
 
 -- Tabla de fechas no laborables (feriados, cierres especiales)

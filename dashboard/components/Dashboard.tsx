@@ -1,8 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, PlusCircle, DollarSign, Calendar } from 'lucide-react';
+import { RefreshCw, PlusCircle, DollarSign, Calendar, History, BarChart2, LogOut } from 'lucide-react';
 import { toast } from 'sonner';
+import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { Pedido, ESTADOS_ACTIVOS } from '@/lib/types';
 import KPICards from './KPICards';
@@ -10,6 +11,8 @@ import OrderList from './OrderList';
 import NewOrderModal from './NewOrderModal';
 import PreciosModal from './PreciosModal';
 import CalendarioModal from './CalendarioModal';
+import HistorialModal from './HistorialModal';
+import EstadisticasModal from './EstadisticasModal';
 
 function getTodayStart(): string {
   const d = new Date();
@@ -18,11 +21,14 @@ function getTodayStart(): string {
 }
 
 export default function Dashboard() {
-  const [pedidos, setPedidos]               = useState<Pedido[]>([]);
-  const [loading, setLoading]               = useState(true);
-  const [isModalOpen, setIsModalOpen]       = useState(false);
-  const [isPreciosOpen, setIsPreciosOpen]   = useState(false);
-  const [isCalendarioOpen, setIsCalendario] = useState(false);
+  const router = useRouter();
+  const [pedidos, setPedidos]                   = useState<Pedido[]>([]);
+  const [loading, setLoading]                   = useState(true);
+  const [isModalOpen, setIsModalOpen]           = useState(false);
+  const [isPreciosOpen, setIsPreciosOpen]       = useState(false);
+  const [isCalendarioOpen, setIsCalendario]     = useState(false);
+  const [isHistorialOpen, setIsHistorialOpen]   = useState(false);
+  const [isEstadisticasOpen, setIsEstadisticas] = useState(false);
 
   // ── Carga inicial de pedidos de hoy ───────────────────────────────────────
   const fetchPedidos = useCallback(async () => {
@@ -83,6 +89,11 @@ export default function Dashboard() {
     setPedidos((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
   }
 
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    router.replace('/login');
+  }
+
   // ── KPIs ──────────────────────────────────────────────────────────────────
   const pendientes   = pedidos.filter((p) => ESTADOS_ACTIVOS.includes(p.estado)).length;
   const recaudacion  = pedidos
@@ -99,7 +110,7 @@ export default function Dashboard() {
             <img src="/logo.png" alt="Zurutuza Secpa" className="h-14 w-auto" />
             <p className="text-lg text-gray-500 mt-1">Panel de Pedidos del Día</p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 flex-wrap justify-end">
             <button
               onClick={() => setIsPreciosOpen(true)}
               className="flex items-center gap-2 text-gray-600 hover:text-gray-800 border rounded-xl px-4 py-2 text-base font-semibold"
@@ -115,11 +126,32 @@ export default function Dashboard() {
               Calendario
             </button>
             <button
+              onClick={() => setIsHistorialOpen(true)}
+              className="flex items-center gap-2 text-gray-600 hover:text-gray-800 border rounded-xl px-4 py-2 text-base font-semibold"
+            >
+              <History className="w-5 h-5" />
+              Historial
+            </button>
+            <button
+              onClick={() => setIsEstadisticas(true)}
+              className="flex items-center gap-2 text-gray-600 hover:text-gray-800 border rounded-xl px-4 py-2 text-base font-semibold"
+            >
+              <BarChart2 className="w-5 h-5" />
+              Estadísticas
+            </button>
+            <button
               onClick={fetchPedidos}
               className="flex items-center gap-2 text-gray-500 hover:text-gray-700 border rounded-xl px-4 py-2 text-base"
             >
               <RefreshCw className="w-5 h-5" />
               Actualizar
+            </button>
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-2 text-red-400 hover:text-red-600 border border-red-200 rounded-xl px-4 py-2 text-base"
+            >
+              <LogOut className="w-5 h-5" />
+              Salir
             </button>
           </div>
         </div>
@@ -169,8 +201,10 @@ export default function Dashboard() {
           onCreated={fetchPedidos}
         />
       )}
-      {isPreciosOpen   && <PreciosModal   onClose={() => setIsPreciosOpen(false)} />}
+      {isPreciosOpen    && <PreciosModal    onClose={() => setIsPreciosOpen(false)} />}
       {isCalendarioOpen && <CalendarioModal onClose={() => setIsCalendario(false)} />}
+      {isHistorialOpen  && <HistorialModal  onClose={() => setIsHistorialOpen(false)} />}
+      {isEstadisticasOpen && <EstadisticasModal onClose={() => setIsEstadisticas(false)} />}
     </div>
   );
 }

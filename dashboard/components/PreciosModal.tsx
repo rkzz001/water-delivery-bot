@@ -12,7 +12,10 @@ interface Props {
 
 export default function PreciosModal({ onClose }: Props) {
   const [inputValues, setInputValues] = useState<Record<string, string>>(
-    () => Object.fromEntries(Object.entries(PRECIOS_DEFAULT).map(([k, v]) => [k, String(v)]))
+    () => ({
+      ...Object.fromEntries(Object.entries(PRECIOS_DEFAULT).map(([k, v]) => [k, String(v)])),
+      hora_corte: '14',
+    })
   );
   const [loading, setLoading]   = useState(true);
   const [saving,  setSaving]    = useState(false);
@@ -35,11 +38,15 @@ export default function PreciosModal({ onClose }: Props) {
   }
 
   async function handleSave() {
-    // Validate all inputs are valid positive numbers
     const rows: { clave: string; valor: number }[] = [];
     for (const [clave, raw] of Object.entries(inputValues)) {
       const num = parseInt(raw, 10);
-      if (isNaN(num) || num < 0) {
+      if (clave === 'hora_corte') {
+        if (isNaN(num) || num < 0 || num > 23) {
+          toast.error('❌ La hora de corte debe ser entre 0 y 23');
+          return;
+        }
+      } else if (isNaN(num) || num < 0) {
         toast.error(`❌ Precio inválido para ${clave}`);
         return;
       }
@@ -55,7 +62,7 @@ export default function PreciosModal({ onClose }: Props) {
     if (error) {
       toast.error(`❌ Error al guardar: ${error.message}`);
     } else {
-      toast.success('✅ Precios actualizados');
+      toast.success('✅ Configuración actualizada');
       onClose();
     }
   }
@@ -68,7 +75,7 @@ export default function PreciosModal({ onClose }: Props) {
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md">
 
         <div className="flex items-center justify-between p-6 border-b">
-          <h2 className="text-2xl font-bold text-gray-800">💲 Configurar Precios</h2>
+          <h2 className="text-2xl font-bold text-gray-800">⚙️ Precios y Horario</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1">
             <X className="w-7 h-7" />
           </button>
@@ -95,6 +102,23 @@ export default function PreciosModal({ onClose }: Props) {
                 </div>
               </div>
             ))}
+
+            {/* Hora de corte */}
+            <div className="border-t pt-4 mt-1 flex items-center justify-between gap-4">
+              <label className="text-lg font-semibold text-gray-700 flex-1">
+                Atender hasta las...
+              </label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  value={inputValues['hora_corte'] ?? '14'}
+                  onChange={(e) => handleChange('hora_corte', e.target.value)}
+                  min={0} max={23}
+                  className="w-20 border-2 border-gray-200 rounded-xl px-3 py-3 text-xl font-bold text-gray-900 text-right focus:outline-none focus:border-blue-400"
+                />
+                <span className="text-xl font-bold text-gray-500">hs</span>
+              </div>
+            </div>
 
             <div className="flex gap-3 pt-4">
               <button

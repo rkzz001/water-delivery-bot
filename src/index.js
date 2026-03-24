@@ -1,7 +1,8 @@
 // Entry point: inicializa DB, WhatsApp, health check y scheduler
 
 import { initDb }                  from './database/connection.js';
-import { initPriceCache }          from './cache/precioCache.js';
+import { initPriceCache,
+         getHoraCorte }           from './cache/precioCache.js';
 import { initDisponibilidadCache,
          isTodayClosed }           from './cache/disponibilidadCache.js';
 import { getClientAssignment,
@@ -144,7 +145,7 @@ onMessage(async (from, text, quotedText) => {
     }
 
     const hour = new Date().getHours();
-    if (hour >= 14) {
+    if (hour >= getHoraCorte()) {
       await sendMessage(from, MESSAGES.CLOSED_FOR_TODAY);
       return;
     }

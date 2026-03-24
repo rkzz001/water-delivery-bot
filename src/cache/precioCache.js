@@ -18,8 +18,13 @@ export const PRICES = {
   20: 4000, 12: 3500, 10: 2500, 8: 2600, 5: 1800, sifon: 1000,
 };
 
+// Hora de corte de atención (configurable desde el Dashboard)
+let HORA_CORTE = 14;
+export function getHoraCorte() { return HORA_CORTE; }
+
 function applyRows(rows) {
   for (const row of rows) {
+    if (row.clave === 'hora_corte') { HORA_CORTE = row.valor; continue; }
     const key = DB_KEY_MAP[row.clave];
     if (key !== undefined) PRICES[key] = row.valor;
   }
@@ -39,6 +44,11 @@ export async function initPriceCache() {
     .channel('configuracion-realtime')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'configuracion' }, (payload) => {
       const row = payload.new ?? payload.old;
+        if (row?.clave === 'hora_corte' && payload.new?.valor != null) {
+        HORA_CORTE = payload.new.valor;
+        console.log(`[PriceCache] Hora de corte actualizada: ${HORA_CORTE}h`);
+        return;
+      }
       const key = DB_KEY_MAP[row?.clave];
       if (key !== undefined && payload.new?.valor != null) {
         PRICES[key] = payload.new.valor;
