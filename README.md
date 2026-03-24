@@ -315,6 +315,39 @@ El dashboard es una app Next.js 15 (App Router) desplegada en Vercel. Permite al
 
 ## Changelog
 
+### v2.4 — Historial, estadísticas, autenticación y horario configurable (2026-03-24)
+
+**Autenticación (Supabase Auth)**
+- `AuthGuard`: verifica sesión al montar; redirige a `/login` si no hay sesión activa.
+- `dashboard/app/login/page.tsx`: login con email/contraseña via `supabase.auth.signInWithPassword`.
+- Botón "Salir" en el header llama a `supabase.auth.signOut()` y redirige a `/login`.
+- Para crear el usuario admin: Supabase → Authentication → Users → Add user.
+
+**HistorialModal**
+- Selector de fecha (input `type="date"`, zona `America/Argentina/Buenos_Aires`).
+- Consulta `pedidos` entre `YYYY-MM-DDT00:00:00-03:00` y `T23:59:59.999-03:00` para respetar el día local.
+- Muestra KPIs del día seleccionado (total pedidos, recaudado, pendientes) y la lista completa con `OrderList`.
+
+**EstadisticasModal**
+- Selector de período: 7 / 30 / 90 días.
+- KPIs del período: pedidos totales, recaudado, promedio por día.
+- Gráfico de barras CSS de recaudación por día (sin librería externa).
+- Breakdown por producto y por repartidor (barras de progreso CSS).
+- Agrupa por fecha UTC del campo `created_at`; diferencia de 3h con Argentina es aceptable en una vista de estadísticas.
+
+**Horario configurable desde el Dashboard**
+- Nueva clave `hora_corte` en la tabla `configuracion` (valor default: `14`).
+- `precioCache.js` exporta `getHoraCorte()`; la variable `HORA_CORTE` se actualiza vía Realtime igual que los precios.
+- `index.js` usa `getHoraCorte()` en lugar del hardcoded `14`.
+- El modal "Precios" (renombrado a "Precios y Horario") incluye un campo para editar la hora de corte (0–23).
+- Para inicializar la clave en la BD ya existente:
+  ```sql
+  INSERT INTO configuracion (clave, valor) VALUES ('hora_corte', 14)
+  ON CONFLICT (clave) DO NOTHING;
+  ```
+
+---
+
 ### v2.3 — Fix PreciosModal: input atascado + error RLS al guardar (2026-03-24)
 
 **Bug: input atascado en el último dígito**
