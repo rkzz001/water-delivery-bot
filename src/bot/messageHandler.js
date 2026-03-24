@@ -1,6 +1,7 @@
 // FSM pura del bot: recibe (phone, text, session, assignment) → retorna { reply, nextStep, sideEffects }
 
-import { STEPS, MESSAGES, DRIVERS, PRICES } from '../config.js';
+import { STEPS, MESSAGES, DRIVERS } from '../config.js';
+import { PRICES } from '../cache/precioCache.js';
 
 // ── Helpers de texto ──────────────────────────────────────────────────────────
 
@@ -38,11 +39,13 @@ function hasQuantity(text) {
 }
 
 /**
- * True si el texto especifica un tamaño de bidón (12 o 20 litros).
+ * True si el texto especifica un tamaño de bidón o menciona sifón.
  * Sin esto no se puede calcular el precio con certeza.
  */
 function hasSize(text) {
-  return /\d+\s*litros/i.test(text) || /\bde\s+(12|20)\b/i.test(text);
+  return /\d+\s*litros/i.test(text)
+    || /\bde\s+(5|8|10|12|20)\b/i.test(text)
+    || /sif[oó]n/i.test(text);
 }
 
 function isSocialPhrase(text) {
@@ -98,7 +101,15 @@ function detectFaq(text) {
     return 'Repartimos hasta las 14hs.';
   }
   if (/cu[aá]nto\s+(cuesta|sale|vale|cuestan|salen|valen)|qu[eé]\s+precio\s+tiene|cuales?\s+son\s+los\s+precios/i.test(text)) {
-    return 'Bidón de 20 litros: $4.000\nBidón de 12 litros: $3.500';
+    const fmt = (n) => n.toLocaleString('es-AR');
+    return [
+      `Sifón de soda: $${fmt(PRICES.sifon)}`,
+      `Bidón 5L: $${fmt(PRICES[5])}`,
+      `Bidón 8L: $${fmt(PRICES[8])}`,
+      `Bidón 10L: $${fmt(PRICES[10])}`,
+      `Bidón 12L: $${fmt(PRICES[12])}`,
+      `Bidón 20L: $${fmt(PRICES[20])}`,
+    ].join('\n');
   }
   return null;
 }
@@ -110,6 +121,13 @@ function detectFaq(text) {
  * Exportada para que orderService.js pueda calcular el total al crear un pedido.
  */
 export function calculateTotal(details) {
+  // Sifón de soda: "N sifón/sifones de soda"
+  if (/sif[oó]n/i.test(details)) {
+    const m = details.match(/(\d+)/);
+    const qty = m ? parseInt(m[1]) : 1;
+    return qty * (PRICES.sifon ?? 1000);
+  }
+
   const litrosMatch = details.match(/(\d+)\s*litros/i);
   let liters = litrosMatch ? parseInt(litrosMatch[1]) : null;
 
@@ -141,6 +159,14 @@ export function calculateTotal(details) {
  * resumen y la notificación al repartidor sean siempre claros.
  */
 function normalizeDetails(details, sizeLabel) {
+  // Sifón: construir "N sifón/sifones de soda"
+  if (sizeLabel === 'sifon') {
+    const qMatch = details.match(/^(\d+)/);
+    const qty  = qMatch ? parseInt(qMatch[1]) : null;
+    const word = qty === 1 ? 'sifón' : 'sifones';
+    return qty !== null ? `${qty} ${word} de soda` : 'sifón de soda';
+  }
+
   if (/litros/i.test(details)) return details; // tamaño ya presente
 
   if (!/bid[oó]n/i.test(details)) {
@@ -172,13 +198,16 @@ function normalizeDetails(details, sizeLabel) {
  * Requiere que hasSize(details) sea true.
  */
 function canonicalizeDetails(details) {
+  // Sifón: ya está en forma canónica "N sifones de soda"
+  if (/sif[oó]n/i.test(details)) return details;
+
   // Detectar litros
   let liters = null;
   const litMatch = details.match(/(\d+)\s*litros/i);
   if (litMatch) {
     liters = parseInt(litMatch[1]);
   } else {
-    const deMatch = details.match(/\bde\s+(12|20)\b/i);
+    const deMatch = details.match(/\bde\s+(5|8|10|12|20)\b/i);
     if (deMatch) liters = parseInt(deMatch[1]);
   }
   if (!liters || !PRICES[liters]) return details; // no se puede determinar
@@ -458,8 +487,16 @@ export function handleMessage(phone, text, session, assignment) {
     // ── WAITING_SIZE ─────────────────────────────────────────────────────────
     case STEPS.WAITING_SIZE: {
       const sizeMap = {
-        '1': '12 litros', '12': '12 litros', '12 litros': '12 litros', '12l': '12 litros',
-        '2': '20 litros', '20': '20 litros', '20 litros': '20 litros', '20l': '20 litros',
+        // Opciones del menú numerado
+        '1': 'sifon',      '2': '5 litros',   '3': '8 litros',
+        '4': '10 litros',  '5': '12 litros',  '6': '20 litros',
+        // Texto libre
+        'sifon': 'sifon',  'sifón': 'sifon',  'soda': 'sifon',
+        '5l': '5 litros',  '5 litros': '5 litros',
+        '8l': '8 litros',  '8 litros': '8 litros',
+        '10l': '10 litros','10 litros': '10 litros',
+        '12l': '12 litros','12 litros': '12 litros',
+        '20l': '20 litros','20 litros': '20 litros',
       };
       const sizeLabel = sizeMap[input.trim().toLowerCase()];
 

@@ -14,14 +14,26 @@ export interface Pedido {
   updated_at: string;
 }
 
+export interface ConfiguracionItem {
+  clave: string;
+  valor: number;
+}
+
+export interface FechaCerrada {
+  fecha: string; // YYYY-MM-DD
+  motivo: string;
+}
+
+export type ProductoTipo = 'sifon_soda' | 'bidon_5l' | 'bidon_8l' | 'bidon_10l' | 'bidon_12l' | 'bidon_20l';
+
 export type NuevoPedidoForm = {
-  cliente: string;
-  cantidad: number;
-  size: '20' | '12';
-  direccion: string;
-  repartidor: string;
-  metodo_pago: string;
-  nota: string;
+  cliente:      string;
+  producto_tipo: ProductoTipo;
+  cantidad:     number;
+  direccion:    string;
+  repartidor:   string;
+  metodo_pago:  string;
+  nota:         string;
 };
 
 // Mapeo visual de estados internos del bot
@@ -44,7 +56,41 @@ export const ESTADO_BADGE: Record<string, string> = {
 // Estados que aún requieren acción
 export const ESTADOS_ACTIVOS = ['PENDING', 'ASSIGNED', 'NOT_ANSWERED', 'UNASSIGNED'];
 
-export const PRECIOS: Record<string, number> = { '20': 4000, '12': 3500 };
+// Precios default — el modal los reemplaza con los valores reales de Supabase
+export const PRECIOS_DEFAULT: Record<ProductoTipo, number> = {
+  sifon_soda: 1000,
+  bidon_5l:   1800,
+  bidon_8l:   2600,
+  bidon_10l:  2500,
+  bidon_12l:  3500,
+  bidon_20l:  4000,
+};
+
+export const PRODUCTO_LABELS: Record<ProductoTipo, string> = {
+  sifon_soda: 'Sifón de soda',
+  bidon_5l:   'Bidón 5 litros',
+  bidon_8l:   'Bidón 8 litros',
+  bidon_10l:  'Bidón 10 litros',
+  bidon_12l:  'Bidón 12 litros',
+  bidon_20l:  'Bidón 20 litros',
+};
+
+export const PRODUCTOS_ORDEN: ProductoTipo[] = [
+  'sifon_soda', 'bidon_5l', 'bidon_8l', 'bidon_10l', 'bidon_12l', 'bidon_20l',
+];
+
+/** Genera el string de producto para guardar en la BD (igual al formato del bot). */
+export function buildProductoString(tipo: ProductoTipo, cantidad: number): string {
+  if (tipo === 'sifon_soda') {
+    const word = cantidad === 1 ? 'sifón' : 'sifones';
+    return `${cantidad} ${word} de soda`;
+  }
+  const litrosMap: Record<string, string> = {
+    bidon_5l: '5', bidon_8l: '8', bidon_10l: '10', bidon_12l: '12', bidon_20l: '20',
+  };
+  const word = cantidad === 1 ? 'bidón' : 'bidones';
+  return `${cantidad} ${word} de ${litrosMap[tipo]} litros`;
+}
 
 export const REPARTIDORES = ['Silvio', 'Alejandro', 'Damian'];
 

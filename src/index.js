@@ -1,6 +1,9 @@
 // Entry point: inicializa DB, WhatsApp, health check y scheduler
 
 import { initDb }                  from './database/connection.js';
+import { initPriceCache }          from './cache/precioCache.js';
+import { initDisponibilidadCache,
+         isTodayClosed }           from './cache/disponibilidadCache.js';
 import { getClientAssignment,
          upsertClientAssignment,
          getOrderById,
@@ -31,6 +34,9 @@ try {
   console.error('[DB] Error al inicializar la base de datos:', err.message);
   process.exit(1);
 }
+
+await initPriceCache();
+await initDisponibilidadCache();
 
 // ─── Health check + panel de asignación ──────────────────────────────────────
 
@@ -126,6 +132,16 @@ onMessage(async (from, text, quotedText) => {
     }
 
     // ── Mensaje de un cliente ────────────────────────────────────────────────
+
+    // Verificar disponibilidad: domingo o feriado
+    const cerrado = isTodayClosed();
+    if (cerrado) {
+      const msg = cerrado.esDomingo
+        ? MESSAGES.CLOSED_SUNDAY
+        : MESSAGES.CLOSED_HOLIDAY(cerrado.motivo);
+      await sendMessage(from, msg);
+      return;
+    }
 
     const hour = new Date().getHours();
     if (hour >= 14) {

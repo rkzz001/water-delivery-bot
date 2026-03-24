@@ -1,8 +1,11 @@
 'use client';
 
-import { useState, FormEvent } from 'react';
+import { useState, useEffect, FormEvent } from 'react';
 import { X } from 'lucide-react';
-import { NuevoPedidoForm, REPARTIDORES, PRECIOS, DRIVER_ID_MAP } from '@/lib/types';
+import {
+  NuevoPedidoForm, ProductoTipo, REPARTIDORES, DRIVER_ID_MAP,
+  PRECIOS_DEFAULT, PRODUCTO_LABELS, PRODUCTOS_ORDEN, buildProductoString,
+} from '@/lib/types';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 
@@ -12,22 +15,34 @@ interface Props {
 }
 
 const FORM_INICIAL: NuevoPedidoForm = {
-  cliente:     '',
-  cantidad:    1,
-  size:        '20',
-  direccion:   '',
-  repartidor:  'Silvio',
-  metodo_pago: 'efectivo',
-  nota:        '',
+  cliente:       '',
+  producto_tipo: 'bidon_20l',
+  cantidad:      1,
+  direccion:     '',
+  repartidor:    'Silvio',
+  metodo_pago:   'efectivo',
+  nota:          '',
 };
 
 export default function NewOrderModal({ onClose, onCreated }: Props) {
   const [form, setForm]       = useState<NuevoPedidoForm>(FORM_INICIAL);
+  const [precios, setPrecios] = useState<Record<string, number>>(PRECIOS_DEFAULT);
   const [loading, setLoading] = useState(false);
 
-  const total    = form.cantidad * PRECIOS[form.size];
-  const palabra  = form.cantidad === 1 ? 'bidón' : 'bidones';
-  const producto = `${form.cantidad} ${palabra} de ${form.size} litros`;
+  // Cargar precios actuales desde Supabase
+  useEffect(() => {
+    supabase.from('configuracion').select('clave, valor').then(({ data }) => {
+      if (data?.length) {
+        const map: Record<string, number> = { ...PRECIOS_DEFAULT };
+        for (const row of data) map[row.clave] = row.valor;
+        setPrecios(map);
+      }
+    });
+  }, []);
+
+  const precioUnitario = precios[form.producto_tipo] ?? 0;
+  const total          = form.cantidad * precioUnitario;
+  const producto       = buildProductoString(form.producto_tipo, form.cantidad);
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) {
     const { name, value } = e.target;
@@ -57,7 +72,6 @@ export default function NewOrderModal({ onClose, onCreated }: Props) {
       estado:      'PENDING',
       origen:      'telefono',
     });
-
     setLoading(false);
 
     if (error) {
@@ -71,7 +85,6 @@ export default function NewOrderModal({ onClose, onCreated }: Props) {
   }
 
   return (
-    /* Backdrop */
     <div
       className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
@@ -86,7 +99,6 @@ export default function NewOrderModal({ onClose, onCreated }: Props) {
           </button>
         </div>
 
-        {/* Form */}
         <form onSubmit={handleSubmit} className="p-6 flex flex-col gap-5">
 
           {/* Teléfono / nombre cliente */}
@@ -104,32 +116,35 @@ export default function NewOrderModal({ onClose, onCreated }: Props) {
             />
           </div>
 
-          {/* Cantidad + Tamaño en la misma fila */}
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-lg font-semibold text-gray-700 mb-1">Cantidad</label>
-              <input
-                type="number"
-                name="cantidad"
-                value={form.cantidad}
-                onChange={handleChange}
-                min={1}
-                max={20}
-                className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-xl font-bold text-gray-900 text-center focus:outline-none focus:border-blue-400"
-              />
-            </div>
-            <div>
-              <label className="block text-lg font-semibold text-gray-700 mb-1">Tamaño</label>
-              <select
-                name="size"
-                value={form.size}
-                onChange={handleChange}
-                className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg text-gray-900 focus:outline-none focus:border-blue-400"
-              >
-                <option value="20">20 litros — $4.000</option>
-                <option value="12">12 litros — $3.500</option>
-              </select>
-            </div>
+          {/* Producto */}
+          <div>
+            <label className="block text-lg font-semibold text-gray-700 mb-1">Producto</label>
+            <select
+              name="producto_tipo"
+              value={form.producto_tipo}
+              onChange={handleChange}
+              className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg text-gray-900 focus:outline-none focus:border-blue-400"
+            >
+              {PRODUCTOS_ORDEN.map((tipo) => (
+                <option key={tipo} value={tipo}>
+                  {PRODUCTO_LABELS[tipo]} — ${(precios[tipo] ?? 0).toLocaleString('es-AR')}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Cantidad */}
+          <div>
+            <label className="block text-lg font-semibold text-gray-700 mb-1">Cantidad</label>
+            <input
+              type="number"
+              name="cantidad"
+              value={form.cantidad}
+              onChange={handleChange}
+              min={1}
+              max={20}
+              className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-xl font-bold text-gray-900 text-center focus:outline-none focus:border-blue-400"
+            />
           </div>
 
           {/* Preview del pedido */}

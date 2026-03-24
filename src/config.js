@@ -1,6 +1,7 @@
 // Constantes globales: repartidores, estados de pedido, pasos de conversación y mensajes del bot
 
 import 'dotenv/config';
+import { getASK_SIZE } from './cache/precioCache.js';
 
 export const DRIVERS = {
   1: 'Silvio',
@@ -23,11 +24,6 @@ export const ADMIN_PHONE = process.env.ADMIN_PHONE;
 // Formato: XXXXXXXXXX-XXXXXXXXXX@g.us (lo loguea el bot automáticamente)
 export const NOTIFY_GROUP_ID = process.env.NOTIFY_GROUP_ID;
 
-// Precio por tamaño de bidón (en pesos)
-export const PRICES = {
-  20: 4000,
-  12: 3500,
-};
 
 export const ORDER_STATUS = {
   PENDING:      'PENDING',
@@ -123,11 +119,10 @@ export const MESSAGES = {
   INVALID_DRIVER_CHOICE:
     'Respondé con 1 (Silvio), 2 (Alejandro), 3 (Damian) o 4 (No sé).',
 
-  ASK_SIZE:
-    '¿De qué tamaño los querés?\n1 De 12 litros — $3.500\n2 De 20 litros — $4.000',
+  get ASK_SIZE() { return getASK_SIZE(); },
 
   INVALID_SIZE_CHOICE:
-    'Elegí 1 (12 litros) o 2 (20 litros).',
+    'Elegí una opción del 1 al 6.',
 
   INVALID_ADDRESS:
     'Indicá la dirección completa con calle y número (ej: Corrientes 1234).',
@@ -184,6 +179,12 @@ export const MESSAGES = {
   // Horario cerrado
   CLOSED_FOR_TODAY:
     '¡Hola! Por hoy ya cerramos los pedidos. Podés escribirnos mañana y con gusto te atendemos. 🙏',
+
+  CLOSED_SUNDAY:
+    '¡Hola! Los domingos no trabajamos. Dejanos tu mensaje y el lunes te atendemos con gusto. 😊',
+
+  CLOSED_HOLIDAY: (motivo) =>
+    `¡Hola! Hoy no estamos trabajando por ${motivo}. Podés escribirnos mañana y te atendemos. 😊`,
 
   // Recordatorio diario
   REMINDER_HEADER:
