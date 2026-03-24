@@ -1,0 +1,18 @@
+{
+  "name": "Panel de Pedidos — Fábrica de Soda",
+  "short_name": "Pedidos Soda",
+  "description": "Dashboard administrativo para gestión de pedidos de agua",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#2563eb",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -100,7 +100,7 @@ export default function NewOrderModal({ onClose, onCreated }: Props) {
               value={form.cliente}
               onChange={handleChange}
               placeholder="Ej: 5492396432617"
-              className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg focus:outline-none focus:border-blue-400"
+              className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg text-gray-900 focus:outline-none focus:border-blue-400"
             />
           </div>
 
@@ -115,7 +115,7 @@ export default function NewOrderModal({ onClose, onCreated }: Props) {
                 onChange={handleChange}
                 min={1}
                 max={20}
-                className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-xl font-bold text-center focus:outline-none focus:border-blue-400"
+                className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-xl font-bold text-gray-900 text-center focus:outline-none focus:border-blue-400"
               />
             </div>
             <div>
@@ -124,7 +124,7 @@ export default function NewOrderModal({ onClose, onCreated }: Props) {
                 name="size"
                 value={form.size}
                 onChange={handleChange}
-                className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg focus:outline-none focus:border-blue-400"
+                className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg text-gray-900 focus:outline-none focus:border-blue-400"
               >
                 <option value="20">20 litros — $4.000</option>
                 <option value="12">12 litros — $3.500</option>
@@ -151,7 +151,7 @@ export default function NewOrderModal({ onClose, onCreated }: Props) {
               onChange={handleChange}
               placeholder="Ej: Corrientes 1234"
               required
-              className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg focus:outline-none focus:border-blue-400"
+              className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg text-gray-900 focus:outline-none focus:border-blue-400"
             />
           </div>
 
@@ -162,7 +162,7 @@ export default function NewOrderModal({ onClose, onCreated }: Props) {
               name="repartidor"
               value={form.repartidor}
               onChange={handleChange}
-              className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg focus:outline-none focus:border-blue-400"
+              className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg text-gray-900 focus:outline-none focus:border-blue-400"
             >
               {REPARTIDORES.map((r) => (
                 <option key={r} value={r}>{r}</option>
@@ -177,7 +177,7 @@ export default function NewOrderModal({ onClose, onCreated }: Props) {
               name="metodo_pago"
               value={form.metodo_pago}
               onChange={handleChange}
-              className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg focus:outline-none focus:border-blue-400"
+              className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg text-gray-900 focus:outline-none focus:border-blue-400"
             >
               <option value="efectivo">💵 Efectivo</option>
               <option value="transferencia">💳 Transferencia</option>
@@ -195,7 +195,7 @@ export default function NewOrderModal({ onClose, onCreated }: Props) {
               onChange={handleChange}
               rows={2}
               placeholder="Ej: Entregar después de las 14hs"
-              className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg focus:outline-none focus:border-blue-400 resize-none"
+              className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg text-gray-900 focus:outline-none focus:border-blue-400 resize-none"
             />
           </div>
 

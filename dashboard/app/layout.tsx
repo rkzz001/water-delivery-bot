@@ -8,6 +8,15 @@ const geist = Geist({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: "Panel de Pedidos — Fábrica de Soda",
   description: "Dashboard administrativo para gestión de pedidos",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Pedidos Soda",
+  },
+  other: {
+    "mobile-web-app-capable": "yes",
+  },
 };
 
 export default function RootLayout({

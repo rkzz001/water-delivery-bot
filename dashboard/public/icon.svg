@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="80" fill="#2563eb"/>
+  <!-- Water drop -->
+  <path d="M256 100 C256 100 160 220 160 300 C160 356 203 400 256 400 C309 400 352 356 352 300 C352 220 256 100 256 100Z" fill="white" opacity="0.95"/>
+  <!-- Shine -->
+  <ellipse cx="218" cy="270" rx="22" ry="38" fill="white" opacity="0.4" transform="rotate(-20 218 270)"/>
+</svg>
