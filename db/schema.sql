@@ -1,31 +1,35 @@
--- Esquema completo de la base de datos para el sistema de reparto de agua
+-- Esquema de la base de datos para el bot de reparto de agua en bidones
+-- Ejecutar en Supabase: Dashboard → SQL Editor → New query → pegar y ejecutar
 
--- Relación aprendida: teléfono cliente → repartidor preferido
+-- Asignaciones cliente → repartidor preferido (tabla interna del bot)
 CREATE TABLE IF NOT EXISTS client_assignments (
-  phone        TEXT PRIMARY KEY,
-  driver_id    INTEGER NOT NULL,
-  created_at   TEXT DEFAULT (datetime('now')),
-  updated_at   TEXT DEFAULT (datetime('now'))
+  phone      TEXT PRIMARY KEY,
+  driver_id  INTEGER NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Sesiones de conversación activas (tabla interna del bot)
+CREATE TABLE IF NOT EXISTS sessions (
+  phone      TEXT PRIMARY KEY,
+  step       TEXT NOT NULL,
+  data       TEXT NOT NULL DEFAULT '{}',
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- Pedidos de agua en bidones
-CREATE TABLE IF NOT EXISTS orders (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  client_phone TEXT NOT NULL,
-  driver_id    INTEGER,               -- NULL si SIN ASIGNAR
-  address      TEXT NOT NULL,
-  details      TEXT NOT NULL,
-  status       TEXT NOT NULL DEFAULT 'PENDING',
-  -- Estados válidos: PENDING | ASSIGNED | DELIVERED | NOT_ANSWERED | UNASSIGNED
-  created_at   TEXT DEFAULT (datetime('now')),
-  updated_at   TEXT DEFAULT (datetime('now'))
-);
-
--- Sesiones de conversación persistidas para resiliencia ante reinicios
-CREATE TABLE IF NOT EXISTS sessions (
-  phone        TEXT PRIMARY KEY,
-  step         TEXT NOT NULL,
-  -- Pasos válidos: IDLE | WAITING_ORDER | WAITING_ADDRESS | WAITING_DRIVER
-  data         TEXT NOT NULL DEFAULT '{}',  -- JSON serializado
-  updated_at   TEXT DEFAULT (datetime('now'))
+CREATE TABLE IF NOT EXISTS pedidos (
+  id          BIGSERIAL PRIMARY KEY,
+  cliente     TEXT        NOT NULL,             -- teléfono del cliente
+  producto    TEXT        NOT NULL,             -- ej: "2 bidones de 20 litros"
+  direccion   TEXT        NOT NULL,
+  driver_id   INTEGER,                          -- uso interno para consultas del bot
+  repartidor  TEXT,                             -- nombre del repartidor (nullable si sin asignar)
+  metodo_pago TEXT        DEFAULT 'efectivo',   -- efectivo | transferencia
+  total       INTEGER     DEFAULT 0,            -- precio total en pesos
+  nota        TEXT,                             -- aclaración opcional del cliente
+  estado      TEXT        NOT NULL DEFAULT 'PENDING',
+  -- Estados: PENDING | ASSIGNED | DELIVERED | NOT_ANSWERED | UNASSIGNED
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  updated_at  TIMESTAMPTZ DEFAULT NOW()
 );

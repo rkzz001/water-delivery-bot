@@ -6,10 +6,12 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "loadtest": "node scripts/loadtest.js",
+    "seed": "node scripts/seed.js"
   },
   "dependencies": {
-    "better-sqlite3": "^9.4.3",
+    "@supabase/supabase-js": "^2.100.0",
     "dotenv": "^16.4.5",
     "node-cron": "^3.0.3",
     "qrcode-terminal": "^0.12.0",

@@ -1,29 +1,14 @@
-// Singleton de conexión a SQLite: inicializa la DB y aplica el esquema al arrancar
+// Verificación de conexión a Supabase al arrancar el bot
 
-import Database from 'better-sqlite3';
-import { readFileSync, mkdirSync } from 'fs';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { supabase } from './supabaseClient.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const DB_DIR    = join(__dirname, '../../db');
-const DB_PATH   = join(DB_DIR, 'orders.db');
-const SCHEMA    = join(__dirname, '../../db/schema.sql');
-
-let db;
-
-export function getDb() {
-  if (!db) {
-    mkdirSync(DB_DIR, { recursive: true });
-
-    db = new Database(DB_PATH);
-    // WAL mode mejora la concurrencia en lecturas simultáneas
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
-
-    // Aplicar esquema al iniciar (CREATE TABLE IF NOT EXISTS → idempotente)
-    const schema = readFileSync(SCHEMA, 'utf8');
-    db.exec(schema);
+/**
+ * Verifica que la conexión a Supabase funcione comprobando que la tabla 'pedidos' existe.
+ * Las tablas deben crearse manualmente en el SQL Editor de Supabase usando db/schema.sql.
+ */
+export async function initDb() {
+  const { error } = await supabase.from('pedidos').select('id').limit(0);
+  if (error) {
+    throw new Error(`Error conectando a Supabase: ${error.message}`);
   }
-  return db;
 }

@@ -1,6 +1,7 @@
 // Cliente real de WhatsApp: autenticación por QR con sesión persistida en disco
 
-import { Client, LocalAuth } from 'whatsapp-web.js';
+import pkg from 'whatsapp-web.js';
+const { Client, LocalAuth } = pkg;
 import qrcode from 'qrcode-terminal';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -57,6 +58,10 @@ client.on('auth_failure', (msg) => {
   console.error('[WhatsApp] Fallo de autenticación:', msg);
 });
 
+// Timestamp de inicio del bot (en segundos, igual que msg.timestamp de whatsapp-web.js)
+// Se usa para ignorar mensajes que llegaron mientras el bot estaba caído.
+const BOT_START_TIME = Math.floor(Date.now() / 1000);
+
 // ─── API pública ──────────────────────────────────────────────────────────────
 
 /**
@@ -66,7 +71,8 @@ client.on('auth_failure', (msg) => {
  */
 export async function sendMessage(to, text) {
   try {
-    const chatId = `${to}@c.us`;
+    // Si ya tiene sufijo @g.us (grupo) o @c.us usarlo directo, si no agregar @c.us
+    const chatId = to.includes('@') ? to : `${to}@c.us`;
     await client.sendMessage(chatId, text);
   } catch (err) {
     console.error(`[WhatsApp] Error enviando mensaje a ${to}:`, err.message);
@@ -74,22 +80,64 @@ export async function sendMessage(to, text) {
 }
 
 /**
- * Registra un handler que se ejecuta cada vez que llega un mensaje de texto individual.
- * Filtra mensajes de grupos y mensajes del propio bot.
- * @param {(from: string, text: string) => void} handler
+ * Escucha mensajes de un admin específico dentro de un grupo.
+ * Funciona cuando el bot tiene número propio (no el mismo que el admin).
+ * @param {string} groupId    - Chat ID del grupo (con @g.us)
+ * @param {string} adminPhone - Teléfono del admin sin @c.us
+ * @param {(text: string) => void} handler
  */
+export function onAdminGroupMessage(groupId, adminPhone, handler) {
+  client.on('message', async (msg) => {
+    if (msg.from !== groupId) return;
+    if (msg.type !== 'chat') return;
+    if (msg.timestamp < BOT_START_TIME) return;
+
+    let quotedText = null;
+    if (msg.hasQuotedMsg) {
+      try {
+        const quoted = await msg.getQuotedMessage();
+        quotedText = quoted.body;
+      } catch { /* ignorar */ }
+    }
+
+    handler(msg.body.trim(), quotedText);
+  });
+}
+
 export function onMessage(handler) {
-  client.on('message', (msg) => {
-    // Ignorar mensajes de grupos, estados y mensajes propios
-    if (msg.from.endsWith('@g.us')) return;
+  client.on('message', async (msg) => {
+    // Loguear grupos para facilitar la configuración de NOTIFY_GROUP_ID
+    if (msg.from.endsWith('@g.us')) {
+      console.log(`[WhatsApp] Mensaje de grupo — Group ID: ${msg.from}`);
+      return;
+    }
+    // Ignorar estados y mensajes propios
     if (msg.from === 'status@broadcast') return;
     if (msg.fromMe) return;
-    // Ignorar mensajes que no sean texto
-    if (msg.type !== 'chat') return;
+
+    // Ignorar mensajes anteriores al arranque del bot (evita reprocesar cola offline)
+    if (msg.timestamp < BOT_START_TIME) return;
+
+    // Permitir texto e imágenes (comprobantes de transferencia)
+    const isText  = msg.type === 'chat';
+    const isImage = msg.type === 'image' || msg.type === 'document';
+    if (!isText && !isImage) return;
+
+    // Si el mensaje es una respuesta a otro, obtener el texto citado
+    let quotedText = null;
+    if (msg.hasQuotedMsg) {
+      try {
+        const quoted = await msg.getQuotedMessage();
+        quotedText = quoted.body;
+      } catch {
+        // Si falla, simplemente no hay texto citado
+      }
+    }
 
     // Normalizar número: quitar el sufijo @c.us
     const from = msg.from.replace('@c.us', '');
-    handler(from, msg.body.trim());
+    const body = isImage ? '[comprobante]' : msg.body.trim();
+    handler(from, body, quotedText);
   });
 }
 

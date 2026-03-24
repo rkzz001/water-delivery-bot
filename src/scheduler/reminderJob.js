@@ -19,7 +19,7 @@ function groupByDriver(orders) {
  */
 export async function sendReminders() {
   try {
-    const orders  = getPendingOrdersGroupedByDriver();
+    const orders  = await getPendingOrdersGroupedByDriver();
     const grouped = groupByDriver(orders);
 
     for (const [driverId, driverOrders] of Object.entries(grouped)) {

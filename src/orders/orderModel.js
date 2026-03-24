@@ -12,7 +12,7 @@ const VALID_STATUSES = new Set(Object.values(ORDER_STATUS));
  * @returns {{ clientPhone: string, driverId: number|null, address: string, details: string, status: string }}
  */
 export function validateOrder(raw) {
-  const { clientPhone, driverId, address, details, status } = raw;
+  const { clientPhone, driverId, address, details, status, paymentMethod, notes } = raw;
 
   if (!clientPhone || typeof clientPhone !== 'string' || !clientPhone.trim()) {
     throw new Error('El teléfono del cliente es obligatorio.');
@@ -36,10 +36,12 @@ export function validateOrder(raw) {
   }
 
   return {
-    clientPhone: clientPhone.trim(),
-    driverId:    driverId ?? null,
-    address:     address.trim(),
-    details:     details.trim(),
-    status:      status ?? ORDER_STATUS.PENDING,
+    clientPhone:   clientPhone.trim(),
+    driverId:      driverId ?? null,
+    address:       address.trim(),
+    details:       details.trim(),
+    status:        status ?? ORDER_STATUS.PENDING,
+    paymentMethod: paymentMethod ?? 'efectivo',
+    notes:         notes ?? null,
   };
 }

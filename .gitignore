@@ -1,4 +1,9 @@
 node_modules/
-db/orders.db
+db/*.db
+db/*.db-wal
+db/*.db-shm
 sessions/
+.wwebjs_auth/
+.wwebjs_cache/
+logs/
 .env
