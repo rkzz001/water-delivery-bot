@@ -92,7 +92,7 @@ export default function Dashboard() {
       <header className="bg-white border-b shadow-sm px-6 py-5">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-black text-gray-900">🥤 Fábrica de Soda</h1>
+            <h1 className="text-3xl font-black text-gray-900">🥤 Zurutuza Pedidos</h1>
             <p className="text-lg text-gray-500">Panel de Pedidos del Día</p>
           </div>
           <button

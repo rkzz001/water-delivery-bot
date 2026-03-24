@@ -6,7 +6,7 @@ import "./globals.css";
 const geist = Geist({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Panel de Pedidos — Fábrica de Soda",
+  title: "Zurutuza Pedidos",
   description: "Dashboard administrativo para gestión de pedidos",
   manifest: "/manifest.json",
   appleWebApp: {

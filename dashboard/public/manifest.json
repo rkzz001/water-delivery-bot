@@ -1,6 +1,6 @@
 {
-  "name": "Panel de Pedidos — Fábrica de Soda",
-  "short_name": "Pedidos Soda",
+  "name": "Zurutuza Pedidos",
+  "short_name": "Zurutuza",
   "description": "Dashboard administrativo para gestión de pedidos de agua",
   "start_url": "/",
   "display": "standalone",
