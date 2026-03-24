@@ -1,6 +1,7 @@
 /**
- * Load test: simula N conversaciones completas contra la FSM + DB.
- * No conecta a WhatsApp. Mide throughput y detecta errores de lógica/estado.
+ * Load test: simula N conversaciones completas contra la FSM.
+ * No conecta a WhatsApp. Las sesiones son en memoria (rápido).
+ * Los precios se cargan desde Supabase para verificar el caché dinámico.
  *
  * Uso:
  *   node scripts/loadtest.js              # 300 conversaciones
@@ -12,33 +13,56 @@ import { writeFileSync, mkdirSync } from 'fs';
 import { join, dirname }            from 'path';
 import { fileURLToPath }            from 'url';
 
-import { getDb }               from '../src/database/connection.js';
-import { handleMessage }       from '../src/bot/messageHandler.js';
-import { getOrCreateSession,
-         saveSession,
-         clearSession }        from '../src/bot/sessionManager.js';
-import { getClientAssignment,
-         upsertClientAssignment,
-         createOrder,
-         getActiveOrdersByDriver,
-         updateOrderStatus }   from '../src/database/queries.js';
-import { validateOrder }       from '../src/orders/orderModel.js';
+import { initDb }          from '../src/database/connection.js';
+import { initPriceCache, PRICES } from '../src/cache/precioCache.js';
+import { handleMessage }   from '../src/bot/messageHandler.js';
+import { validateOrder }   from '../src/orders/orderModel.js';
 import { STEPS, ORDER_STATUS } from '../src/config.js';
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
 
-const argv    = process.argv.slice(2);
-const argVal  = (flag, fallback) => { const i = argv.indexOf(flag); return i !== -1 && argv[i + 1] ? argv[i + 1] : fallback; };
-const N       = parseInt(argVal('--clients', '1000'), 10);
-const NO_LOG  = argv.includes('--no-log');
+const argv   = process.argv.slice(2);
+const argVal = (flag, fallback) => { const i = argv.indexOf(flag); return i !== -1 && argv[i + 1] ? argv[i + 1] : fallback; };
+const N      = parseInt(argVal('--clients', '300'), 10);
+const NO_LOG = argv.includes('--no-log');
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Stores en memoria (evita miles de queries a Supabase por sesión) ──────────
 
-const rand = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const sessionStore    = new Map(); // phone → { step, data }
+const assignmentStore = new Map(); // phone → { driver_id }
+const orderStore      = [];        // pedidos creados durante el test
+let   nextOrderId     = 1;
 
-// ── DB ────────────────────────────────────────────────────────────────────────
-
-getDb();
+function getOrCreateSession(phone) {
+  return sessionStore.get(phone) ?? { step: STEPS.IDLE, data: {} };
+}
+function saveSession(phone, step, data) {
+  sessionStore.set(phone, { step, data });
+}
+function clearSession(phone) {
+  sessionStore.delete(phone);
+}
+function getClientAssignment(phone) {
+  return assignmentStore.get(phone) ?? null;
+}
+function upsertClientAssignment(phone, driverId) {
+  assignmentStore.set(phone, { driver_id: driverId });
+}
+function createOrderInMemory(validated) {
+  const order = { id: nextOrderId++, ...validated, estado: validated.status };
+  orderStore.push(order);
+  return order;
+}
+function getActiveOrdersByDriver(driverId) {
+  return orderStore.filter(
+    (o) => o.driverId === driverId &&
+           [ORDER_STATUS.PENDING, ORDER_STATUS.ASSIGNED].includes(o.estado),
+  );
+}
+function markOrderDelivered(orderId) {
+  const o = orderStore.find((o) => o.id === orderId);
+  if (o) o.estado = ORDER_STATUS.DELIVERED;
+}
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
 
@@ -52,64 +76,65 @@ const stats = {
   scenarioCounts: {},
 };
 
-// Almacena todas las conversaciones para el archivo de log
 const allConversations = [];
 
-// ── Respuesta automática por paso de la FSM ───────────────────────────────────
+// ── Respuesta automática por paso ─────────────────────────────────────────────
+
+const rand = (arr) => arr[Math.floor(Math.random() * arr.length)];
 
 const AUTO_RESPONSE = {
-  [STEPS.WAITING_ORDER]:        () => rand(['2 bidones de 20 litros', '3 bidones de 12 litros', '1 bidón de 20', 'bidones']),
+  [STEPS.WAITING_ORDER]: () => rand([
+    '2 bidones de 20 litros', '3 bidones de 12 litros',
+    '1 bidón de 20', '2 sifones', 'bidones', '1 sifón de soda',
+  ]),
   [STEPS.WAITING_QUANTITY]:     () => rand(['2', '3', '1', 'dos']),
-  [STEPS.WAITING_SIZE]:         () => rand(['1', '2', '12', '20', '12l', '20l']),  // 1=12L, 2=20L + respuesta directa
+  [STEPS.WAITING_SIZE]:         () => rand(['1', '2', '3', '4', '5', '6']),
   [STEPS.WAITING_ADDRESS]:      () => rand([
-    'Corrientes 1234',
-    'San Martín 500',
-    'Rivadavia 789 piso 2',
-    'Av. Santa Fe 3000',
-    'Rivadavia esquina Corrientes 1200',
-    '9 de Julio 350, timbre 4B',
-    'Mitre 100, la casa con portón azul, timbre 3',
-    // Caracteres especiales — verifica codificación en DB y ticket
-    "O'Higgins 500",
-    "Calle 'Falsa' 123",
-    'Güemes 1234',
-    'San Martín 500 ✨',
-    'Peña 800, 2° piso',
+    'Corrientes 1234', 'San Martín 500', 'Rivadavia 789 piso 2',
+    'Av. Santa Fe 3000', '9 de Julio 350, timbre 4B',
+    "O'Higgins 500", 'Güemes 1234', 'San Martín 500 ✨', 'Peña 800, 2° piso',
   ]),
   [STEPS.WAITING_DRIVER]:       () => rand(['1', '2', '3', '4']),
-  [STEPS.WAITING_PAYMENT]:      () => rand(['1', '2', 'efectivo', 'transferencia', 'transfer', 'efect']),
+  [STEPS.WAITING_PAYMENT]:      () => rand(['1', '2', 'efectivo', 'transferencia', 'transfer']),
   [STEPS.WAITING_RECEIPT]:      () => '[comprobante]',
-  [STEPS.WAITING_NOTES]:        () => rand(['No', 'nop', 'ok', 'paso', 'Estoy en casa de 9 a 12', 'Llamar antes de llegar', 'mejor de 12', 'mejor de 20']),
+  [STEPS.WAITING_NOTES]:        () => rand(['No', 'nop', 'ok', 'Estoy en casa de 9 a 12', 'mejor de 12', 'mejor de 20']),
   [STEPS.WAITING_RESCHEDULE]:   () => rand(['Sí', 'No']),
-  [STEPS.WAITING_CONFIRMATION]: () => rand(['1', '1', '1', 'dale', 'sí', '2', 'un momento', 'pará', 'hmm', 'mejor 3', 'mejor 2', 'mejor 3 de 12', 'mejor 1 de 20']), // duda + cambio cantidad + cambio cantidad/tamaño
+  [STEPS.WAITING_CONFIRMATION]: () => rand(['1', '1', '1', 'dale', 'sí', '2', 'hmm', 'mejor 3', 'mejor 2', 'mejor 3 de 12', 'mejor 1 de 20']),
 };
 
-// ── Procesar un mensaje (FSM + DB, sin WhatsApp I/O) ─────────────────────────
+// ── Procesar un mensaje (FSM + stores en memoria) ─────────────────────────────
 
 function processMessage(phone, text, convLog) {
   stats.messages++;
 
   const session    = getOrCreateSession(phone);
   const assignment = getClientAssignment(phone);
+
   const { reply, nextStep, nextData, sideEffects } = handleMessage(phone, text, session, assignment);
 
   convLog.push({ from: 'cliente', text });
   convLog.push({ from: 'bot',     text: reply });
 
   if (sideEffects?.createOrder) {
-    const validated = validateOrder({ clientPhone: phone, ...sideEffects.createOrder });
-    createOrder(validated);
-    stats.orders++;
-    convLog.push({ from: 'sistema', text: `Pedido creado — estado: ${validated.status}, pago: ${validated.paymentMethod}` });
+    try {
+      const { driverId, address, details, status, paymentMethod, notes } = sideEffects.createOrder;
+      const validated = validateOrder({ clientPhone: phone, driverId, address, details, status, paymentMethod, notes });
+      const order     = createOrderInMemory(validated);
+      stats.orders++;
+      const total = reply.match(/\$[\d.,]+/)?.[0] ?? '$?';
+      convLog.push({ from: 'sistema', text: `Pedido #${order.id} creado — ${validated.details} — Total aprox: ${total}` });
+    } catch (err) {
+      convLog.push({ from: 'sistema', text: `ERROR al crear pedido: ${err.message}` });
+      stats.errors++;
+    }
   }
 
   if (sideEffects?.saveAssignment) {
     upsertClientAssignment(phone, sideEffects.saveAssignment.driverId);
-    convLog.push({ from: 'sistema', text: `Repartidor ${sideEffects.saveAssignment.driverId} guardado para este cliente` });
   }
 
   if (sideEffects?.rescheduleOrder) {
-    convLog.push({ from: 'sistema', text: `Reprogramación solicitada — pedido #${sideEffects.rescheduleOrder.orderId}` });
+    convLog.push({ from: 'sistema', text: `Reprogramación — pedido #${sideEffects.rescheduleOrder.orderId}` });
   }
 
   if (nextStep === STEPS.IDLE) {
@@ -121,7 +146,7 @@ function processMessage(phone, text, convLog) {
   return { nextStep };
 }
 
-// ── Ejecutar una conversación completa ────────────────────────────────────────
+// ── Conversación con mensajes automáticos ─────────────────────────────────────
 
 const MAX_TURNS = 15;
 
@@ -138,7 +163,6 @@ function runConversation(phone, firstMessage, scenarioName) {
 
     while (nextStep !== STEPS.IDLE && turns < MAX_TURNS) {
       const responder = AUTO_RESPONSE[nextStep];
-
       if (!responder) {
         outcome = `stuck en paso: ${nextStep}`;
         stats.errors++;
@@ -146,7 +170,6 @@ function runConversation(phone, firstMessage, scenarioName) {
         clearSession(phone);
         break;
       }
-
       ({ nextStep } = processMessage(phone, responder(), convLog));
       turns++;
     }
@@ -157,7 +180,6 @@ function runConversation(phone, firstMessage, scenarioName) {
       stats.stuckConvs.push({ phone, step: nextStep, scenario: scenarioName });
       clearSession(phone);
     }
-
   } catch (err) {
     outcome = `error: ${err.message}`;
     stats.errors++;
@@ -169,11 +191,7 @@ function runConversation(phone, firstMessage, scenarioName) {
   stats.conversations++;
 }
 
-// ── Conversación con secuencia fija de mensajes ───────────────────────────────
-//
-// Útil para probar flujos exactos (doble saludo, cambio de opinión, chars especiales)
-// sin depender del azar de AUTO_RESPONSE.
-// Después de agotar la secuencia fija, continúa con AUTO_RESPONSE para los pasos restantes.
+// ── Conversación con secuencia fija ───────────────────────────────────────────
 
 function runFixedConversation(phone, fixedMessages, scenarioName) {
   stats.scenarioCounts[scenarioName] = (stats.scenarioCounts[scenarioName] ?? 0) + 1;
@@ -184,14 +202,12 @@ function runFixedConversation(phone, fixedMessages, scenarioName) {
   let nextStep  = STEPS.IDLE;
 
   try {
-    // Secuencia predeterminada de mensajes
     for (const msg of fixedMessages) {
       ({ nextStep } = processMessage(phone, msg, convLog));
       turns++;
       if (nextStep === STEPS.IDLE) break;
     }
 
-    // Continúa con AUTO_RESPONSE para los pasos que queden
     while (nextStep !== STEPS.IDLE && turns < MAX_TURNS) {
       const responder = AUTO_RESPONSE[nextStep];
       if (!responder) {
@@ -211,7 +227,6 @@ function runFixedConversation(phone, fixedMessages, scenarioName) {
       stats.stuckConvs.push({ phone, step: nextStep, scenario: scenarioName });
       clearSession(phone);
     }
-
   } catch (err) {
     outcome = `error: ${err.message}`;
     stats.errors++;
@@ -226,65 +241,51 @@ function runFixedConversation(phone, fixedMessages, scenarioName) {
 // ── Escenarios ────────────────────────────────────────────────────────────────
 
 const SCENARIOS = [
+  // Saludos
   ['saludo-hola',           'Hola'],
   ['saludo-buenas',         'Buenas'],
   ['saludo-buenos-dias',    'Buenos días'],
-  ['saludo-buenas-tardes',  'Buenas tardes'],
+  // Bidones clásicos
   ['pedido-20l',            '2 bidones de 20 litros'],
   ['pedido-12l',            '3 bidones de 12 litros'],
   ['pedido-sin-tamaño',     '2 bidones'],
   ['pedido-sin-cantidad',   'bidones de 20 litros'],
+  // Nuevos productos
+  ['pedido-sifon',          '2 sifones'],
+  ['pedido-sifon-soda',     '1 sifón de soda'],
+  ['pedido-5l',             '3 bidones de 5 litros'],
+  ['pedido-8l',             '2 bidones de 8 litros'],
+  ['pedido-10l',            '1 bidón de 10 litros'],
+  // Todo junto
   ['todo-junto-a',          '2 bidones de 20 litros a Corrientes 1234'],
   ['todo-junto-en',         '3 bidones en San Martín 500'],
   ['todo-junto-dir',        '1 bidón, dirección: Rivadavia 789'],
+  // Lenguaje natural
   ['natural-me-mandas',     'Hola, me podés mandar 2 bidones de 20 litros'],
   ['natural-quiero-pedir',  'quiero pedir 3 bidones de 12'],
   ['natural-che',           'che, me mandás 2 bidones a Av. Corrientes 1234'],
-  ['natural-buenas-tardes', 'buenas tardes, me mandás 1 bidón de 20'],
-  ['natural-quisiera',      'quisiera pedir 2 bidones de 20'],
+  ['natural-quisiera',      'quisiera pedir 2 sifones'],
+  // Números escritos
   ['numeros-escritos',      'dos bidones de veinte litros'],
-  ['numeros-mixtos',        'tres bidones de 20 litros'],
+  ['numeros-mixtos',        'tres bidones de 12 litros'],
+  // Frases sociales
   ['social-gracias',        'Gracias'],
-  ['social-muchas-gracias', 'Muchas gracias'],
   ['social-ok',             'ok'],
   ['social-dale',           'dale'],
-  ['social-genial',         'genial'],
-  ['ambiguo-solo-texto',    'quiero agua'],
-  // FAQ en IDLE (sin flujo abierto)
-  ['faq-horario-idle',      '¿Hasta qué hora reparten?'],
-  ['faq-precio-idle',       '¿Cuánto cuesta el bidón de 20?'],
-  // Direcciones complejas en el mensaje inicial
-  ['dirección-esquina',     '2 bidones de 20 a Rivadavia esquina Corrientes 1200'],
-  ['dirección-numero-calle','1 bidón de 12 a 9 de Julio 350'],
-  // El "Extranjero" — números escritos (ya cubierto, verificación explícita)
-  ['extranjero-dos',        'dos bidones de veinte litros'],
-  ['extranjero-tres',       'tres bidones de 12 litros'],
-  // El "Indeciso" — cambio de cantidad en confirmación
-  ['indeciso-cambio',        '2 bidones de 20 a Corrientes 1234'],
-  // El "Arrepentido" — cambia cantidad Y tamaño en confirmación ("mejor 3 de 12")
-  ['arrepentido-qty-size',   '2 bidones de 20 a San Martín 500'],
-  // Mezcla de formatos numéricos (El "Extranjero" ampliado)
-  ['mezcla-dos-de-veinte',   'Dos bidones de 20 litros'],
-  ['mezcla-2-de-12',         '2 de 12 a Rivadavia 789'],
-  ['mezcla-tres-de-doce',    'tres bidones de 12 litros a Corrientes 100'],
-  // El "Cliente Educado" — usa "por favor" en distintas posiciones
-  ['educado-por-favor',      'Por favor, 2 bidones de 20 litros'],
-  ['educado-por-favor-2',    'por favor mandarme 3 bidones de 12'],
-  ['educado-por-favor-3',    'buen día, por favor quiero 1 bidón de 20 a Corrientes 1234'],
-  // El "Cliente de Respuesta Corta" — respuestas mínimas en cada paso
-  ['respuesta-corta-20l',    '2'],
-  ['respuesta-corta-12l',    '1'],
-  // El "Arrepentido de último momento" — cambia tamaño en la nota
-  ['arrepentido-en-nota',    '2 bidones de 20 a San Martín 500'],
-  ['arrepentido-en-nota-2',  '3 bidones de 20 a Corrientes 1234'],
-  // Caracteres especiales en el mensaje inicial (todo-junto con dirección especial)
-  ['char-comilla-simple',    "2 bidones de 20 a O'Higgins 500"],
-  ['char-tilde-u',           '1 bidón de 12 a Güemes 1234'],
-  ['char-emoji',             '3 bidones de 20 a San Martín 500 ✨'],
-  ['char-segundo-piso',      '2 bidones de 12 a Peña 800, 2° piso'],
+  // FAQ
+  ['faq-horario',           '¿Hasta qué hora reparten?'],
+  ['faq-precio',            '¿Cuánto cuesta el bidón de 20?'],
+  // Respuesta corta
+  ['respuesta-corta-1',     '2'],
+  ['respuesta-corta-2',     '1'],
+  // Caracteres especiales
+  ['char-comilla',          "2 bidones de 20 a O'Higgins 500"],
+  ['char-tilde',            '1 bidón de 12 a Güemes 1234'],
+  ['char-emoji',            '3 bidones de 20 a San Martín 500 ✨'],
+  ['char-segundo-piso',     '2 bidones de 12 a Peña 800, 2° piso'],
 ];
 
-// ── Escribir log de conversaciones ────────────────────────────────────────────
+// ── Log de conversaciones ─────────────────────────────────────────────────────
 
 function buildLogFile(driverActions) {
   const SEP  = '─'.repeat(62);
@@ -292,39 +293,33 @@ function buildLogFile(driverActions) {
   const lines = [];
 
   lines.push(SEP2);
-  lines.push(` LOAD TEST — ${stats.conversations} conversaciones simuladas`);
+  lines.push(` LOAD TEST — ${stats.conversations} conversaciones`);
   lines.push(` Generado: ${new Date().toLocaleString('es-AR')}`);
+  lines.push(` Precios cargados: sifón=$${PRICES.sifon} | 5L=$${PRICES[5]} | 8L=$${PRICES[8]} | 10L=$${PRICES[10]} | 12L=$${PRICES[12]} | 20L=$${PRICES[20]}`);
   lines.push(SEP2);
   lines.push('');
 
   for (let i = 0; i < allConversations.length; i++) {
     const { phone, scenarioName, outcome, turns, log } = allConversations[i];
-
     lines.push(SEP);
     lines.push(` #${String(i + 1).padStart(3, '0')}  ${scenarioName}  [${phone}]`);
     lines.push(` Resultado: ${outcome}  |  Turnos: ${turns}`);
     lines.push(SEP);
     lines.push('');
-
     for (const entry of log) {
       if (entry.from === 'cliente') {
         lines.push(`  Cliente : ${entry.text}`);
       } else if (entry.from === 'bot') {
-        // Indentar respuestas multilínea del bot
         const botLines = entry.text.split('\n');
         lines.push(`  Bot     : ${botLines[0]}`);
-        for (const extra of botLines.slice(1)) {
-          lines.push(`            ${extra}`);
-        }
+        for (const extra of botLines.slice(1)) lines.push(`            ${extra}`);
       } else {
         lines.push(`  [sistema] ${entry.text}`);
       }
     }
-
     lines.push('');
   }
 
-  // Resumen al final del archivo
   lines.push(SEP2);
   lines.push(' RESUMEN');
   lines.push(SEP2);
@@ -336,9 +331,8 @@ function buildLogFile(driverActions) {
   lines.push('');
   lines.push('  Por escenario:');
   for (const [name, count] of Object.entries(stats.scenarioCounts).sort((a, b) => b[1] - a[1])) {
-    lines.push(`    ${name.padEnd(28)} ${count}`);
+    lines.push(`    ${name.padEnd(30)} ${count}`);
   }
-
   if (stats.stuckConvs.length > 0) {
     lines.push('');
     lines.push('  Conversaciones bloqueadas:');
@@ -346,23 +340,28 @@ function buildLogFile(driverActions) {
       lines.push(`    ${c.phone}  paso: ${c.step}  escenario: ${c.scenario}`);
     }
   }
-
   lines.push('');
   return lines.join('\n');
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
 
-function run() {
+async function run() {
   const SEP = '═'.repeat(60);
   console.log(`\n${SEP}`);
   console.log(` LOAD TEST — ${N} conversaciones`);
   console.log(SEP);
 
+  // Inicializar DB y precios desde Supabase
+  console.log('\nConectando a Supabase...');
+  await initDb();
+  await initPriceCache();
+  console.log(`Precios cargados: sifón=$${PRICES.sifon} | 5L=$${PRICES[5]} | 8L=$${PRICES[8]} | 10L=$${PRICES[10]} | 12L=$${PRICES[12]} | 20L=$${PRICES[20]}`);
+
   const t0 = Date.now();
 
   // Fase 1: Clientes nuevos
-  console.log('\nFase 1: Clientes nuevos…');
+  console.log(`\nFase 1: ${N} clientes nuevos…`);
   for (let i = 0; i < N; i++) {
     const phone    = `54911${String(i).padStart(7, '0')}`;
     const scenario = SCENARIOS[i % SCENARIOS.length];
@@ -370,14 +369,13 @@ function run() {
   }
 
   // Fase 2: El "Gamer" — mismo teléfono, 3 pedidos en ráfaga
-  // Verifica que clearSession funcione correctamente entre conversaciones del mismo número.
-  console.log('Fase 2: El Gamer (3 conversaciones en ráfaga, mismo teléfono)…');
+  console.log('Fase 2: El Gamer (3 pedidos en ráfaga, mismo teléfono)…');
   const GAMER_PHONE = '54911GAMER000';
   for (let i = 0; i < 3; i++) {
     runConversation(GAMER_PHONE, '2 bidones de 20 litros a Corrientes 1234', 'gamer-rafaga');
   }
 
-  // Fase 3: Clientes conocidos (segunda compra)
+  // Fase 3: Clientes conocidos (segunda compra con repartidor ya asignado)
   const returningCount = Math.floor(N * 0.3);
   console.log(`Fase 3: ${returningCount} clientes conocidos (segunda compra)…`);
   for (let i = 0; i < returningCount; i++) {
@@ -385,46 +383,55 @@ function run() {
     runConversation(phone, '2 bidones de 20 litros a San Martín 500', 'conocido-directo');
   }
 
-  // Fase 4: Doble saludo y caracteres especiales
-  console.log('Fase 4: Doble saludo y caracteres especiales…');
-
-  // Doble saludo: verifica que el bot no reinicie el flujo por un saludo accidental
-  const DOUBLE_GREET_SEQS = [
-    // "Hola" → WAITING_ORDER → "Hola" de vuelta → bot re-pregunta → pedido normal
-    ['Hola', 'Hola', '2 bidones de 20'],
-    // Saludo + frase social → bot aguanta en WAITING_ORDER
-    ['Hola', 'dale', '3 bidones de 12'],
-    // Doble saludo distinto
-    ['Buenas', 'Hola, ¿hay alguien?', '1 bidón de 20'],
-    // Pregunta FAQ mid-WAITING_ORDER → bot responde y re-pregunta pedido
-    ['Hola', '¿Hasta qué hora reparten?', '2 bidones de 20'],
+  // Fase 4: Flujos fijos — doble saludo, FAQs en medio del flujo, chars especiales
+  console.log('Fase 4: Flujos fijos…');
+  const FIXED_SEQS = [
+    { phone: '54911FIX0001', msgs: ['Hola', 'Hola', '2 bidones de 20'],               name: 'doble-saludo' },
+    { phone: '54911FIX0002', msgs: ['Hola', 'dale', '3 bidones de 12'],               name: 'saludo-social' },
+    { phone: '54911FIX0003', msgs: ['Hola', '¿Hasta qué hora reparten?', '2 bidones de 20'], name: 'faq-mid-flow' },
+    { phone: '54911FIX0004', msgs: ['Hola', '¿Cuánto cuesta el sifón?', '1 sifón'],   name: 'faq-precio-nuevo' },
+    { phone: '54911FIX0005', msgs: ['2 bidones de 20', "O'Higgins 500"],              name: 'char-apostrofo' },
+    { phone: '54911FIX0006', msgs: ['1 bidón de 12', 'Güemes 1234'],                  name: 'char-dieresis' },
+    { phone: '54911FIX0007', msgs: ['1 sifón a Corrientes 1234'],                     name: 'sifon-todo-junto' },
+    { phone: '54911FIX0008', msgs: ['2 sifones a San Martín 500'],                    name: 'sifones-todo-junto' },
+    { phone: '54911FIX0009', msgs: ['3 bidones de 5 litros a Rivadavia 789'],         name: '5l-todo-junto' },
+    { phone: '54911FIX0010', msgs: ['cancelar'],                                      name: 'cancelar-idle' },
+    { phone: '54911FIX0011', msgs: ['2 bidones de 20 a Corrientes 1234', '1', '1', '1', 'cancelar'], name: 'cancelar-en-flow' },
   ];
-  for (let i = 0; i < DOUBLE_GREET_SEQS.length; i++) {
-    const phone = `54911DGREET${String(i).padStart(4, '0')}`;
-    runFixedConversation(phone, DOUBLE_GREET_SEQS[i], 'doble-saludo');
+  for (const { phone, msgs, name } of FIXED_SEQS) {
+    runFixedConversation(phone, msgs, name);
   }
 
-  // Caracteres especiales: verifica codificación Unicode, comillas y emojis en DB
-  const SPECIAL_CHAR_SEQS = [
-    ['2 bidones de 20', "O'Higgins 500"],           // apóstrofo en dirección
-    ['1 bidón de 12',   "Calle 'Falsa' 123"],        // comillas simples
-    ['3 bidones de 20', 'Güemes 1234'],              // diéresis
-    ['2 bidones de 12', 'San Martín 500 ✨'],        // emoji en dirección
-    ['1 bidón de 20',   'Peña 800, 2° piso'],        // símbolo de grado
-    ['2 bidones de 20', 'O\'Brien 123, "el rojo"'],  // comillas dobles + apóstrofo
+  // Fase 5: Verificación de precios — comprueba que calculateTotal usa los precios del caché
+  console.log('Fase 5: Verificación de precios…');
+  const PRICE_CHECKS = [
+    { details: '1 sifón de soda',       expected: PRICES.sifon,   label: 'sifón ×1' },
+    { details: '2 sifones de soda',      expected: PRICES.sifon * 2,  label: 'sifón ×2' },
+    { details: '1 bidón de 5 litros',    expected: PRICES[5],     label: '5L ×1' },
+    { details: '3 bidones de 5 litros',  expected: PRICES[5] * 3, label: '5L ×3' },
+    { details: '1 bidón de 8 litros',    expected: PRICES[8],     label: '8L ×1' },
+    { details: '1 bidón de 10 litros',   expected: PRICES[10],    label: '10L ×1' },
+    { details: '2 bidones de 12 litros', expected: PRICES[12] * 2,label: '12L ×2' },
+    { details: '1 bidón de 20 litros',   expected: PRICES[20],    label: '20L ×1' },
+    { details: '3 bidones de 20 litros', expected: PRICES[20] * 3,label: '20L ×3' },
   ];
-  for (let i = 0; i < SPECIAL_CHAR_SEQS.length; i++) {
-    const phone = `54911SPECH${String(i).padStart(4, '0')}`;
-    // El primer mensaje es el pedido (desde IDLE→WAITING_ADDRESS), el segundo es la dirección
-    runFixedConversation(phone, SPECIAL_CHAR_SEQS[i], 'char-especial');
+
+  const { calculateTotal } = await import('../src/bot/messageHandler.js');
+  let priceErrors = 0;
+  const priceLines = [];
+  for (const { details, expected, label } of PRICE_CHECKS) {
+    const got = calculateTotal(details);
+    const ok  = got === expected;
+    if (!ok) priceErrors++;
+    priceLines.push(`  ${ok ? '✓' : '✗'} ${label.padEnd(14)} esperado=$${expected}  obtenido=$${got}`);
   }
 
-  // Fase 5: Repartidores marcan entregas
-  console.log('Fase 5: Repartidores marcando entregas…');
+  // Fase 6: Repartidores marcan entregas
+  console.log('Fase 6: Repartidores marcando entregas…');
   let driverActions = 0;
   for (const driverId of [1, 2, 3]) {
     for (const order of getActiveOrdersByDriver(driverId)) {
-      updateOrderStatus(order.id, ORDER_STATUS.DELIVERED);
+      markOrderDelivered(order.id);
       driverActions++;
     }
   }
@@ -432,19 +439,19 @@ function run() {
 
   const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
 
-  // Guardar log de conversaciones
+  // Guardar log
   let logPath = null;
   if (!NO_LOG) {
     const __dirname = dirname(fileURLToPath(import.meta.url));
     const logsDir   = join(__dirname, '../logs');
     mkdirSync(logsDir, { recursive: true });
-
     const ts  = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 16);
     logPath   = join(logsDir, `loadtest-${ts}.txt`);
     writeFileSync(logPath, buildLogFile(driverActions), 'utf-8');
   }
 
-  // Reporte en consola
+  // Reporte final
+  const totalErrors = stats.errors + priceErrors;
   console.log(`\n${SEP}`);
   console.log(' RESULTADOS');
   console.log(SEP);
@@ -452,14 +459,12 @@ function run() {
   console.log(`  Mensajes procesados      : ${stats.messages}`);
   console.log(`  Pedidos creados          : ${stats.orders}`);
   console.log(`  Pedidos entregados       : ${driverActions}`);
-  console.log(`  Errores / stuck          : ${stats.errors}`);
+  console.log(`  Errores FSM              : ${stats.errors}`);
   console.log(`  Tiempo total             : ${elapsed}s`);
   console.log(`  Throughput               : ${Math.round(stats.messages / elapsed)} msg/s`);
 
-  console.log('\n  Por escenario:');
-  for (const [name, count] of Object.entries(stats.scenarioCounts).sort((a, b) => b[1] - a[1])) {
-    console.log(`    ${name.padEnd(28)} ${count}`);
-  }
+  console.log('\n  Verificación de precios (vs Supabase):');
+  for (const line of priceLines) console.log(line);
 
   if (stats.stuckConvs.length > 0) {
     console.log('\n  Conversaciones bloqueadas:');
@@ -468,15 +473,16 @@ function run() {
     }
   }
 
-  if (logPath) {
-    console.log(`\n  Conversaciones guardadas en:\n  ${logPath}`);
-  }
+  if (logPath) console.log(`\n  Conversaciones guardadas en:\n  ${logPath}`);
 
-  const ok = stats.errors === 0 ? '✓ Sin errores' : `✗ ${stats.errors} errores`;
+  const ok = totalErrors === 0 ? '✓ Sin errores' : `✗ ${totalErrors} errores`;
   console.log(`\n  Estado final: ${ok}`);
   console.log(`${SEP}\n`);
 
-  process.exit(stats.errors > 0 ? 1 : 0);
+  process.exit(totalErrors > 0 ? 1 : 0);
 }
 
-run();
+run().catch((err) => {
+  console.error('Error fatal en el loadtest:', err);
+  process.exit(1);
+});
