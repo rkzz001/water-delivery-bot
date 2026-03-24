@@ -11,36 +11,49 @@ interface Props {
 }
 
 export default function PreciosModal({ onClose }: Props) {
-  const [precios, setPrecios]   = useState<Record<string, number>>(PRECIOS_DEFAULT);
+  const [inputValues, setInputValues] = useState<Record<string, string>>(
+    () => Object.fromEntries(Object.entries(PRECIOS_DEFAULT).map(([k, v]) => [k, String(v)]))
+  );
   const [loading, setLoading]   = useState(true);
   const [saving,  setSaving]    = useState(false);
 
   useEffect(() => {
     supabase.from('configuracion').select('clave, valor').then(({ data }) => {
       if (data?.length) {
-        const map: Record<string, number> = { ...PRECIOS_DEFAULT };
-        for (const row of data) map[row.clave] = row.valor;
-        setPrecios(map);
+        const map: Record<string, string> = Object.fromEntries(
+          Object.entries(PRECIOS_DEFAULT).map(([k, v]) => [k, String(v)])
+        );
+        for (const row of data) map[row.clave] = String(row.valor);
+        setInputValues(map);
       }
       setLoading(false);
     });
   }, []);
 
   function handleChange(clave: string, value: string) {
-    const num = parseInt(value.replace(/\D/g, ''), 10);
-    if (!isNaN(num)) setPrecios((prev) => ({ ...prev, [clave]: num }));
+    setInputValues((prev) => ({ ...prev, [clave]: value }));
   }
 
   async function handleSave() {
+    // Validate all inputs are valid positive numbers
+    const rows: { clave: string; valor: number }[] = [];
+    for (const [clave, raw] of Object.entries(inputValues)) {
+      const num = parseInt(raw, 10);
+      if (isNaN(num) || num < 0) {
+        toast.error(`❌ Precio inválido para ${clave}`);
+        return;
+      }
+      rows.push({ clave, valor: num });
+    }
+
     setSaving(true);
-    const rows = Object.entries(precios).map(([clave, valor]) => ({ clave, valor }));
     const { error } = await supabase
       .from('configuracion')
       .upsert(rows, { onConflict: 'clave' });
 
     setSaving(false);
     if (error) {
-      toast.error('❌ Error al guardar los precios');
+      toast.error(`❌ Error al guardar: ${error.message}`);
     } else {
       toast.success('✅ Precios actualizados');
       onClose();
@@ -74,7 +87,7 @@ export default function PreciosModal({ onClose }: Props) {
                   <span className="text-xl font-bold text-gray-500">$</span>
                   <input
                     type="number"
-                    value={precios[tipo] ?? ''}
+                    value={inputValues[tipo] ?? ''}
                     onChange={(e) => handleChange(tipo, e.target.value)}
                     min={0}
                     className="w-32 border-2 border-gray-200 rounded-xl px-3 py-3 text-xl font-bold text-gray-900 text-right focus:outline-none focus:border-blue-400"
