@@ -96,8 +96,8 @@ export default function Dashboard() {
       <header className="bg-white border-b shadow-sm px-6 py-5">
         <div className="max-w-5xl mx-auto flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-black text-gray-900">🥤 Zurutuza Pedidos</h1>
-            <p className="text-lg text-gray-500">Panel de Pedidos del Día</p>
+            <img src="/logo.png" alt="Zurutuza Secpa" className="h-14 w-auto" />
+            <p className="text-lg text-gray-500 mt-1">Panel de Pedidos del Día</p>
           </div>
           <div className="flex gap-2">
             <button
