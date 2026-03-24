@@ -49,12 +49,6 @@ npm run dev
 
 Al reconectarse, whatsapp-web.js puede volver a emitir mensajes que llegaron mientras el bot estaba caído. El bot los ignora comparando el `timestamp` del mensaje contra el momento en que arrancó. No requiere ninguna acción manual.
 
-### Problema: "database is locked"
-Si el bot cierra de forma abrupta puede quedar un archivo `.lock`. Eliminarlo sin matar otros procesos:
-```bash
-del db\orders.db.lock
-```
-
 ## Flujo del cliente
 
 El bot entiende lenguaje natural. El cliente puede escribir de distintas formas:
@@ -166,20 +160,32 @@ Cuando el repartidor marca opción `2`:
 3. Si el cliente responde **Sí** (o cualquier frase que empiece con "si/sí"): el pedido se reenvía al repartidor
 4. Si el cliente responde **No** (o cualquier frase que empiece con "no"): no se realiza ninguna acción
 
-## Horario de atención
+## Horario de atención y disponibilidad
 
-El bot acepta pedidos hasta las **14:00**. Pasada esa hora responde con un mensaje de cierre y no abre ningún flujo de conversación.
+El bot verifica tres condiciones antes de atender un cliente:
+
+1. **Domingo** — si el día actual en Argentina (zona `America/Argentina/Buenos_Aires`) es domingo, responde con el mensaje `CLOSED_SUNDAY` y no inicia ningún flujo.
+2. **Fecha cerrada** — si la fecha de hoy existe en la tabla `fechas_cerrado` de Supabase, responde con `CLOSED_HOLIDAY(motivo)` con el motivo cargado desde el Dashboard.
+3. **Horario** — pasadas las **14:00** responde con `CLOSED_FOR_TODAY`.
+
+Las fechas no laborables se administran desde el Dashboard (botón **Calendario**) sin tocar código ni reiniciar el bot. El bot se entera del cambio en tiempo real vía Supabase Realtime (`disponibilidadCache`).
 
 Para cambiar el horario de corte, modificar el valor `14` en `src/index.js` (línea del chequeo `hour >= 14`).
 
-## Precios
+## Catálogo y precios
 
-| Tamaño    | Precio   |
-|-----------|----------|
-| 20 litros | $4.000   |
-| 12 litros | $3.500   |
+| Producto       | Clave DB       | Precio default |
+|----------------|----------------|----------------|
+| Sifón de soda  | `sifon_soda`   | $1.000         |
+| Bidón 5 litros | `bidon_5l`     | $1.800         |
+| Bidón 8 litros | `bidon_8l`     | $2.600         |
+| Bidón 10 litros| `bidon_10l`    | $2.500         |
+| Bidón 12 litros| `bidon_12l`    | $3.500         |
+| Bidón 20 litros| `bidon_20l`    | $4.000         |
 
-El total se calcula automáticamente según la cantidad y el tamaño indicados en el pedido y se muestra antes de la pregunta de pago. Si no se especifica tamaño, se asume 20 litros.
+Los precios se almacenan en la tabla `configuracion` de Supabase y se editan desde el Dashboard (botón **Precios**). El bot los carga al arrancar (`initPriceCache`) y se actualiza en tiempo real vía Supabase Realtime — sin reiniciar el proceso.
+
+El total se calcula automáticamente con `calculateTotal()`. Para el sifón detecta `/sifón/i` y multiplica cantidad × precio; para bidones detecta litros primero y luego busca la cantidad.
 
 > **Decisión técnica:** `hasQuantity()` verifica que el texto *empiece* con un número (`/^\d+/`), no solo que contenga alguno. Esto evita que "bidones de **20** litros" sea interpretado erróneamente como "20 bidones". De forma análoga, `calculateTotal()` detecta el tamaño primero y luego busca el primer número que no sea el tamaño para usarlo como cantidad.
 
@@ -225,13 +231,22 @@ Todos los días a las 09:00 cada repartidor recibe un resumen de sus pedidos en 
 ```
 water-delivery-bot/
 ├── db/
-│   └── schema.sql              # Esquema de la base de datos
+│   ├── schema.sql                  # Esquema principal (pedidos, sesiones, asignaciones)
+│   └── configuracion_schema.sql    # Tablas configuracion y fechas_cerrado
+├── dashboard/                      # Panel admin Next.js (deploy en Vercel)
+│   ├── app/
+│   ├── components/
+│   └── lib/
 ├── src/
 │   ├── index.js                # Entry point y coordinador
-│   ├── config.js               # Repartidores, precios, estados y mensajes
+│   ├── config.js               # Repartidores, estados, mensajes (precios ya no están aquí)
+│   ├── cache/
+│   │   ├── precioCache.js      # Precios en memoria sincronizados con Supabase Realtime
+│   │   └── disponibilidadCache.js  # Fechas cerradas + detección de domingo (Argentina TZ)
 │   ├── database/
-│   │   ├── connection.js       # Conexión SQLite (singleton + migraciones)
-│   │   └── queries.js          # Todas las queries SQL
+│   │   ├── connection.js       # Verificación de conexión a Supabase
+│   │   ├── supabaseClient.js   # Singleton del cliente Supabase
+│   │   └── queries.js          # Todas las operaciones de base de datos
 │   ├── bot/
 │   │   ├── messageHandler.js   # FSM pura del bot
 │   │   └── sessionManager.js   # Estado de conversación por teléfono
@@ -258,16 +273,113 @@ cp .env.example .env
 
 | Variable                    | Descripción                                        | Default                          |
 |-----------------------------|----------------------------------------------------|----------------------------------|
+| `SUPABASE_URL`              | URL del proyecto Supabase                          | —                                |
+| `SUPABASE_KEY`              | anon/service key de Supabase                       | —                                |
 | `TZ`                        | Zona horaria para el cron de las 9am               | `America/Argentina/Buenos_Aires` |
 | `PORT`                      | Puerto HTTP para health check                      | `3000`                           |
 | `DRIVER_1_PHONE`            | Teléfono de Silvio (solo dígitos, sin +, con el 9) | —                                |
 | `DRIVER_2_PHONE`            | Teléfono de Alejandro                              | —                                |
 | `DRIVER_3_PHONE`            | Teléfono de Damian                                 | —                                |
-| `PUPPETEER_EXECUTABLE_PATH` | Ruta al Chrome del sistema (Railway/Render)        | —                                |
+| `ADMIN_PHONE`               | Teléfono del admin para comandos vía WhatsApp      | —                                |
+| `NOTIFY_GROUP_ID`           | ID del grupo de WhatsApp para pedidos sin repartidor | —                              |
+| `PUPPETEER_EXECUTABLE_PATH` | Ruta al Chrome del sistema (Railway)               | —                                |
 
 > **Formato de teléfonos Argentina:** `549` + código de área + número. Ej: `5492396432617`
+>
+> **Local:** los scripts (`npm run dev`, `npm run loadtest`) cargan el `.env` automáticamente con `--env-file=.env` (Node 20+). En Railway las variables se setean directamente en el panel.
+
+## Dashboard (Panel Admin)
+
+El dashboard es una app Next.js 15 (App Router) desplegada en Vercel. Permite al personal de oficina gestionar pedidos en tiempo real sin acceder a WhatsApp.
+
+- **URL:** `zurutuza.vercel.app`
+- **Repo:** subcarpeta `dashboard/` del mismo repositorio
+- **Deploy:** Vercel con Root Directory = `dashboard`
+
+### Funcionalidades
+- **KPIs en tiempo real:** Pedidos Hoy, Pendientes, Recaudado
+- **Lista de pedidos del día** con colores por estado y botón "Marcar Entregado"
+- **Nuevo pedido por teléfono:** modal con todos los productos y precios actualizados
+- **Configurar Precios:** edita los 6 precios del catálogo; el bot los recibe en segundos
+- **Calendario:** marca/desmarca días no laborables; el bot deja de atender esos días automáticamente
+- **PWA instalable:** manifest + ícono → se puede instalar como app en escritorio o celular
+
+### Variables de entorno (Vercel)
+
+| Variable                        | Descripción                  |
+|---------------------------------|------------------------------|
+| `NEXT_PUBLIC_SUPABASE_URL`      | URL del proyecto Supabase    |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anon key de Supabase         |
+
+---
 
 ## Changelog
+
+### v2.2 — Catálogo ampliado, precios dinámicos y disponibilidad (2026-03-24)
+
+**Nuevos productos:**
+- Sifón de soda (`sifon_soda`), Bidón 5L (`bidon_5l`), Bidón 8L (`bidon_8l`), Bidón 10L (`bidon_10l`)
+- Se mantienen 12L y 20L. El menú `ASK_SIZE` ahora lista 6 opciones con precios en tiempo real.
+
+**Precios dinámicos (`src/cache/precioCache.js`):**
+- Al arrancar, `initPriceCache()` carga los precios desde la tabla `configuracion` de Supabase.
+- Suscripción Realtime: cuando el Dashboard edita un precio, el bot lo recibe sin reiniciar.
+- El objeto `PRICES` es mutable y compartido por referencia — todos los módulos que lo importan ven el valor actualizado automáticamente (comportamiento garantizado de ES modules: mutación de objeto, no reasignación de binding).
+- `calculateTotal()` maneja sifón (detecta `/sifón/i`) y bidones (detecta litros primero). `detectFaq` genera la lista de precios dinámicamente desde `PRICES`.
+
+**Disponibilidad (`src/cache/disponibilidadCache.js`):**
+- `isTodayClosed()` verifica en orden: domingo (zona `America/Argentina/Buenos_Aires`) → fecha en `fechas_cerrado`.
+- Suscripción Realtime: el caché se actualiza al instante cuando el Dashboard agrega o elimina una fecha.
+- Check ejecutado antes del check de horario en `index.js`.
+
+**Dashboard — nuevos componentes:**
+- `PreciosModal`: edita los 6 precios del catálogo, hace UPSERT a `configuracion`.
+- `CalendarioModal`: grilla mensual, click para marcar/desmarcar día no laborable con motivo. Usa INSERT/DELETE directo a `fechas_cerrado`.
+- `NewOrderModal`: ahora carga precios reales desde Supabase al abrirse y soporta todos los productos.
+
+**Nuevas tablas Supabase** (`db/configuracion_schema.sql`):
+- `configuracion (clave TEXT PK, valor INTEGER)` — precios del catálogo
+- `fechas_cerrado (fecha DATE PK, motivo TEXT)` — días no laborables
+- Realtime habilitado en ambas (`REPLICA IDENTITY FULL` + `ALTER PUBLICATION`)
+
+**Decisión técnica — por qué caché en memoria y no query por mensaje:**
+Consultar Supabase en cada mensaje del cliente añadiría ~100-300ms de latencia por interacción y acumularía miles de queries diarias innecesarias. El caché en memoria + Realtime da latencia cero en lectura y convergencia en <1s ante un cambio desde el Dashboard.
+
+---
+
+### v2.1 — Dashboard Next.js + campo `origen` (2026-03-24)
+
+- Panel admin en Next.js 15 (App Router), deploy en Vercel (`zurutuza.vercel.app`).
+- KPI cards, lista de pedidos en tiempo real, botón "Marcar Entregado".
+- Modal de carga manual de pedidos telefónicos.
+- Campo `origen TEXT DEFAULT 'bot'` en tabla `pedidos`; el dashboard inserta `origen: 'telefono'`.
+- Supabase Realtime en tabla `pedidos` (`REPLICA IDENTITY FULL` + publicación).
+- PWA: `manifest.json` + logo como ícono instalable.
+
+---
+
+### v2.0 — Migración SQLite → Supabase (2026-03-24)
+
+**Motivación:** deploy en Railway requiere base de datos externa (los contenedores son efímeros). SQLite no sobrevive reinicios.
+
+**Cambios:**
+- Reemplazado `node-sqlite3-wasm` + `pg` por `@supabase/supabase-js`.
+- Tabla `pedidos` con nombres de campo en español: `cliente`, `producto`, `direccion`, `repartidor`, `metodo_pago`, `total`, `nota`, `estado`, `origen`.
+- Tabla `sessions` y `client_assignments` para persistencia de sesiones y asignaciones cliente→repartidor.
+- Todas las funciones de DB son ahora `async`/`await`.
+- `calculateTotal` exportada desde `messageHandler.js` para que `orderService.js` pueda calcular el total antes de insertar.
+
+**Loadtest refactorizado (`scripts/loadtest.js`):**
+- Sesiones y asignaciones en memoria (Map) — evita miles de queries a Supabase por turno.
+- Precios cargados desde Supabase via `initPriceCache()` al inicio.
+- Fase 5: verificación explícita de `calculateTotal` contra los precios reales de Supabase.
+- Scripts usan `--env-file=.env` (Node 20+) en lugar de confiar en el orden de evaluación de módulos ESM para cargar dotenv.
+- `WAITING_SIZE` actualizado para menú de 6 productos; nuevos escenarios de sifón y bidones 5/8/10L.
+
+**Decisión técnica — por qué sesiones en memoria en el loadtest:**
+Con Supabase (async), cada turno de conversación requeriría `getSession` + `upsertSession` = 2 queries. En 300 conversaciones × 8 turnos = 4.800 queries solo para sesiones. El propósito del loadtest es testear la FSM, no el ORM. Usar un `Map` local mantiene la velocidad (132.000 msg/s) sin cambiar el comportamiento de la FSM.
+
+---
 
 ### v1.12 — 1000 conversaciones, doble saludo y test de caracteres especiales
 

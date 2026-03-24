@@ -6,9 +6,9 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
-    "loadtest": "node scripts/loadtest.js",
-    "seed": "node scripts/seed.js"
+    "dev": "node --env-file=.env --watch src/index.js",
+    "loadtest": "node --env-file=.env scripts/loadtest.js",
+    "seed": "node --env-file=.env scripts/seed.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.100.0",
