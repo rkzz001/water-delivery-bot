@@ -48,7 +48,11 @@ export default function NewOrderModal({ onClose, onCreated }: Props) {
     const { name, value } = e.target;
     setForm((prev) => ({
       ...prev,
-      [name]: name === 'cantidad' ? Math.max(1, parseInt(value) || 1) : value,
+      [name]: name === 'cantidad'
+        ? Math.min(20, Math.max(1, parseInt(value) || 1))
+        : name === 'nota'
+          ? value.slice(0, 500)
+          : value,
     }));
   }
 
@@ -56,6 +60,22 @@ export default function NewOrderModal({ onClose, onCreated }: Props) {
     e.preventDefault();
     if (!form.direccion.trim()) {
       toast.error('La dirección es obligatoria');
+      return;
+    }
+    if (form.cantidad < 1 || form.cantidad > 20) {
+      toast.error('La cantidad debe ser entre 1 y 20');
+      return;
+    }
+    if (!PRODUCTOS_ORDEN.includes(form.producto_tipo)) {
+      toast.error('Producto inválido');
+      return;
+    }
+    if (!REPARTIDORES.includes(form.repartidor)) {
+      toast.error('Repartidor inválido');
+      return;
+    }
+    if (!['efectivo', 'transferencia'].includes(form.metodo_pago)) {
+      toast.error('Método de pago inválido');
       return;
     }
 
@@ -112,6 +132,7 @@ export default function NewOrderModal({ onClose, onCreated }: Props) {
               value={form.cliente}
               onChange={handleChange}
               placeholder="Ej: 5492396432617"
+              maxLength={50}
               className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg text-gray-900 focus:outline-none focus:border-blue-400"
             />
           </div>
@@ -166,6 +187,7 @@ export default function NewOrderModal({ onClose, onCreated }: Props) {
               onChange={handleChange}
               placeholder="Ej: Corrientes 1234"
               required
+              maxLength={200}
               className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg text-gray-900 focus:outline-none focus:border-blue-400"
             />
           </div>
@@ -210,6 +232,7 @@ export default function NewOrderModal({ onClose, onCreated }: Props) {
               onChange={handleChange}
               rows={2}
               placeholder="Ej: Entregar después de las 14hs"
+              maxLength={500}
               className="w-full border-2 border-gray-200 rounded-xl px-4 py-3 text-lg text-gray-900 focus:outline-none focus:border-blue-400 resize-none"
             />
           </div>
