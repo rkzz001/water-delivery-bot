@@ -56,6 +56,30 @@ startHealthServer(async (orderId, driverId) => {
   return MESSAGES.ADMIN_ASSIGN_SUCCESS(orderId, DRIVERS[driverId], order.cliente);
 });
 
+// ─── Rate limiting de clientes ────────────────────────────────────────────────
+
+const clientRateLimit = new Map(); // phone → { count, resetAt }
+const CLIENT_RATE_LIMIT_MAX = 15;
+const CLIENT_RATE_LIMIT_WINDOW_MS = 60_000;
+
+function isClientRateLimited(phone) {
+  const now = Date.now();
+  const entry = clientRateLimit.get(phone);
+  if (!entry || now > entry.resetAt) {
+    clientRateLimit.set(phone, { count: 1, resetAt: now + CLIENT_RATE_LIMIT_WINDOW_MS });
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > CLIENT_RATE_LIMIT_MAX;
+}
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [phone, entry] of clientRateLimit) {
+    if (now > entry.resetAt) clientRateLimit.delete(phone);
+  }
+}, 5 * 60_000);
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function getDriverIdByPhone(phone) {
@@ -133,6 +157,11 @@ onMessage(async (from, text, quotedText) => {
     }
 
     // ── Mensaje de un cliente ────────────────────────────────────────────────
+
+    if (isClientRateLimited(from)) {
+      console.warn(`[Bot] Rate limit alcanzado para ${from}`);
+      return;
+    }
 
     // Verificar disponibilidad: domingo o feriado
     const cerrado = isTodayClosed();
