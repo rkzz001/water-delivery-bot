@@ -104,11 +104,16 @@ export function onAdminGroupMessage(groupId, adminPhone, handler) {
   });
 }
 
+const loggedGroups = new Set();
+
 export function onMessage(handler) {
   client.on('message', async (msg) => {
-    // Loguear grupos para facilitar la configuración de NOTIFY_GROUP_ID
+    // Loguear grupos una sola vez para facilitar la configuración de NOTIFY_GROUP_ID
     if (msg.from.endsWith('@g.us')) {
-      console.log(`[WhatsApp] Mensaje de grupo — Group ID: ${msg.from}`);
+      if (!loggedGroups.has(msg.from)) {
+        loggedGroups.add(msg.from);
+        console.log('[WhatsApp] Mensaje de grupo detectado (ID en variables de entorno)');
+      }
       return;
     }
     // Ignorar estados y mensajes propios

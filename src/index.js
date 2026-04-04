@@ -11,7 +11,8 @@ import { getClientAssignment,
          assignOrderToDriver }   from './database/queries.js';
 import { getOrCreateSession,
          saveSession,
-         clearSession }           from './bot/sessionManager.js';
+         clearSession,
+         withSessionLock }        from './bot/sessionManager.js';
 import { handleMessage }          from './bot/messageHandler.js';
 import { createNewOrder,
          processDriverResponse,
@@ -163,52 +164,54 @@ onMessage(async (from, text, quotedText) => {
       return;
     }
 
-    // Verificar disponibilidad: domingo o feriado
-    const cerrado = isTodayClosed();
-    if (cerrado) {
-      const msg = cerrado.esDomingo
-        ? MESSAGES.CLOSED_SUNDAY
-        : MESSAGES.CLOSED_HOLIDAY(cerrado.motivo);
-      await sendMessage(from, msg);
-      return;
-    }
+    await withSessionLock(from, async () => {
+      // Verificar disponibilidad: domingo o feriado
+      const cerrado = isTodayClosed();
+      if (cerrado) {
+        const msg = cerrado.esDomingo
+          ? MESSAGES.CLOSED_SUNDAY
+          : MESSAGES.CLOSED_HOLIDAY(cerrado.motivo);
+        await sendMessage(from, msg);
+        return;
+      }
 
-    const hour = new Date().getHours();
-    if (hour >= getHoraCorte()) {
-      await sendMessage(from, MESSAGES.CLOSED_FOR_TODAY);
-      return;
-    }
+      const hour = new Date().getHours();
+      if (hour >= getHoraCorte()) {
+        await sendMessage(from, MESSAGES.CLOSED_FOR_TODAY);
+        return;
+      }
 
-    const session    = await getOrCreateSession(from);
-    const assignment = await getClientAssignment(from);
+      const session    = await getOrCreateSession(from);
+      const assignment = await getClientAssignment(from);
 
-    const { reply, nextStep, nextData, sideEffects } = handleMessage(
-      from,
-      text,
-      session,
-      assignment ?? null,
-    );
+      const { reply, nextStep, nextData, sideEffects } = handleMessage(
+        from,
+        text,
+        session,
+        assignment ?? null,
+      );
 
-    if (sideEffects.createOrder) {
-      const { driverId: orderDriverId, status, address, details, paymentMethod, notes } = sideEffects.createOrder;
-      await createNewOrder({ clientPhone: from, driverId: orderDriverId, address, details, status, paymentMethod, notes });
-    }
+      if (sideEffects.createOrder) {
+        const { driverId: orderDriverId, status, address, details, paymentMethod, notes } = sideEffects.createOrder;
+        await createNewOrder({ clientPhone: from, driverId: orderDriverId, address, details, status, paymentMethod, notes });
+      }
 
-    if (sideEffects.saveAssignment) {
-      await upsertClientAssignment(from, sideEffects.saveAssignment.driverId);
-    }
+      if (sideEffects.saveAssignment) {
+        await upsertClientAssignment(from, sideEffects.saveAssignment.driverId);
+      }
 
-    if (sideEffects.rescheduleOrder) {
-      await resendOrderToDriver(sideEffects.rescheduleOrder.orderId);
-    }
+      if (sideEffects.rescheduleOrder) {
+        await resendOrderToDriver(sideEffects.rescheduleOrder.orderId);
+      }
 
-    if (nextStep === STEPS.IDLE) {
-      await clearSession(from);
-    } else {
-      await saveSession(from, nextStep, nextData);
-    }
+      if (nextStep === STEPS.IDLE) {
+        await clearSession(from);
+      } else {
+        await saveSession(from, nextStep, nextData);
+      }
 
-    await sendMessage(from, reply);
+      await sendMessage(from, reply);
+    });
 
   } catch (err) {
     console.error(`[Bot] Error procesando mensaje de ${from}:`, err.message);
